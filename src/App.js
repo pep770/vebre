@@ -53,17 +53,6 @@ const Card = ({ children, style, onClick }) => (
 
 const AIBadge = () => <span style={{ display: "inline-flex", alignItems: "center", gap: 5, background: "#1a1a1a", color: "#C9A84C", fontSize: 11, fontWeight: 700, padding: "4px 10px", borderRadius: 99, letterSpacing: "0.05em" }}>✦ AI</span>;
 
-const ScoreRing = ({ score, size = 64 }) => {
-  const color = score >= 70 ? "#059669" : score >= 50 ? "#d97706" : "#dc2626";
-  const c = size / 2, r = c - 5, circ = 2 * Math.PI * r, dash = (score / 100) * circ;
-  return (
-    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
-      <circle cx={c} cy={c} r={r} fill="none" stroke="#f0ede8" strokeWidth={5} />
-      <circle cx={c} cy={c} r={r} fill="none" stroke={color} strokeWidth={5} strokeDasharray={`${dash} ${circ - dash}`} strokeLinecap="round" transform={`rotate(-90 ${c} ${c})`} />
-      <text x={c} y={c + 1} textAnchor="middle" dominantBaseline="middle" style={{ fontSize: size * 0.26, fontWeight: 700, fill: color, fontFamily: "'DM Sans', sans-serif" }}>{score}</text>
-    </svg>
-  );
-};
 
 const Input = ({ label, value, onChange, type = "text", placeholder }) => (
   <div style={{ marginBottom: 14 }}>
