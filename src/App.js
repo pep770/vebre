@@ -9,6 +9,7 @@ const LISTINGS = [
 ];
 
 const SELLER_LISTINGS = [LISTINGS[0], LISTINGS[2]];
+// eslint-disable-next-line no-unused-vars
 const BUYER_OFFERS = [
   { id: "o1", listing: LISTINGS[1], amount: 18200000, status: "PENDING", aiTip: "Zvažte navýšení na 18,8M — data trhu naznačují rezervu prodávajícího kolem 18,5M Kč.", createdAt: "2025-01-08" },
   { id: "o2", listing: LISTINGS[3], amount: 11500000, status: "ACCEPTED", aiTip: "Silná nabídka. Nemovitost je na trhu 22 dní — prodávající je pravděpodobně motivovaný.", createdAt: "2025-01-05" },
@@ -322,7 +323,7 @@ const ReservePage = ({ id, setPage, user }) => {
   const [insolvencyOk, setInsolvencyOk] = useState(null);
   const [contractRead, setContractRead] = useState(false);
   const [formError, setFormError] = useState("");
-  const [paid, setPaid] = useState(false);
+  const [paid, setPaid] = useState(false); // eslint-disable-line no-unused-vars
 
   if (!l) return null;
   const setF = (key) => (e) => setForm(f => ({ ...f, [key]: e.target.value }));
