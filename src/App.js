@@ -89,7 +89,7 @@ const ImageUploader = ({ listingId, currentImgs, onImagesUpdated }) => {
     setError("");
     setUploading(true);
     try {
-      const urls = await Promise.all(imageFiles.map(f => uploadImageToGitHub(f, listingId)));
+      const urls = await Promise.all(imageFiles.map(f => uploadImageToCloudinary(f)));
       const newImgs = [...uploadedImgs, ...urls];
       setUploadedImgs(newImgs);
       onImagesUpdated && onImagesUpdated(newImgs);
