@@ -443,18 +443,160 @@ const ListingCard = ({ l, setPage }) => (
 );
 
 // ─── LISTINGS PAGE ────────────────────────────────────────────────────────────
+const DISTRICTS = ["Vinohrady", "Malá Strana", "Smíchov", "Holešovice", "Žižkov", "Dejvice", "Nusle", "Karlín", "Vršovice", "Střešovice"];
+
+const defaultFilters = { search: "", type: "Vše", priceMin: "", priceMax: "", sizeMin: "", sizeMax: "", bedroomsMin: "", district: "", hasGarage: false, hasBalcony: false, hasGarden: false, hasPool: false };
+
 const ListingsPage = ({ setPage }) => {
   const listings = getListings();
-  const [search, setSearch] = useState(""); const [type, setType] = useState("Vše");
-  const filtered = listings.filter(l => (type === "Vše" || l.propertyType === type) && (!search || l.district?.toLowerCase().includes(search.toLowerCase()) || l.title.toLowerCase().includes(search.toLowerCase())));
-  return (
-    <div style={{ maxWidth: 1200, margin: "0 auto", padding: "32px 24px" }}>
-      <h1 style={{ ...D, fontSize: 36, fontWeight: 800, marginBottom: 6 }}>Nabídka nemovitostí</h1>
-      <div style={{ display: "flex", gap: 10, marginBottom: 24, flexWrap: "wrap" }}>
-        <input placeholder="🔍  Hledat…" value={search} onChange={e => setSearch(e.target.value)} style={{ flex: 1, minWidth: 200, padding: "10px 16px", borderRadius: 12, border: "1.5px solid #e0dbd4", fontSize: 14, fontFamily: "'DM Sans', sans-serif" }} />
-        {["Vše", "APARTMENT", "HOUSE", "OFFICE"].map(t => (<button key={t} onClick={() => setType(t)} style={{ padding: "9px 16px", borderRadius: 10, border: `1.5px solid ${type === t ? "#1a1a1a" : "#e0dbd4"}`, background: type === t ? "#1a1a1a" : "#fff", color: type === t ? "#fff" : "#555", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "'DM Sans', sans-serif" }}>{t}</button>))}
+  const [filters, setFilters] = useState(defaultFilters);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const setF = (key) => (val) => setFilters(f => ({ ...f, [key]: val }));
+  const setFE = (key) => (e) => setFilters(f => ({ ...f, [key]: e.target.value }));
+  const setFB = (key) => () => setFilters(f => ({ ...f, [key]: !f[key] }));
+
+  const filtered = listings.filter(l => {
+    if (filters.type !== "Vše" && l.propertyType !== filters.type) return false;
+    if (filters.search && !l.title.toLowerCase().includes(filters.search.toLowerCase()) && !l.district?.toLowerCase().includes(filters.search.toLowerCase())) return false;
+    if (filters.priceMin && l.askingPrice < +filters.priceMin * 1e6) return false;
+    if (filters.priceMax && l.askingPrice > +filters.priceMax * 1e6) return false;
+    if (filters.sizeMin && l.internalSize < +filters.sizeMin) return false;
+    if (filters.sizeMax && l.internalSize > +filters.sizeMax) return false;
+    if (filters.bedroomsMin && l.bedrooms < +filters.bedroomsMin) return false;
+    if (filters.district && l.district !== filters.district) return false;
+    if (filters.hasGarage && !l.hasGarage) return false;
+    if (filters.hasBalcony && !l.hasBalcony) return false;
+    if (filters.hasGarden && !l.hasGarden) return false;
+    if (filters.hasPool && !l.hasPool) return false;
+    return true;
+  });
+
+  const activeCount = Object.entries(filters).filter(([k, v]) => v !== "" && v !== "Vše" && v !== false && k !== "search").length;
+  const resetFilters = () => setFilters(defaultFilters);
+
+  const SidebarSection = ({ title, children }) => (
+    <div style={{ marginBottom: 22 }}>
+      <div style={{ fontSize: 11, fontWeight: 700, color: "#999", letterSpacing: "0.05em", marginBottom: 10 }}>{title}</div>
+      {children}
+    </div>
+  );
+
+  const CheckBtn = ({ active, onClick, children }) => (
+    <button onClick={onClick} style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 12px", borderRadius: 10, border: `1.5px solid ${active ? "#1a1a1a" : "#e0dbd4"}`, background: active ? "#1a1a1a" : "#fff", color: active ? "#fff" : "#555", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "'DM Sans', sans-serif", width: "100%", marginBottom: 6 }}>
+      <div style={{ width: 16, height: 16, borderRadius: 4, border: `2px solid ${active ? "#fff" : "#ccc"}`, background: active ? "#fff" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+        {active && <span style={{ color: "#1a1a1a", fontSize: 10, fontWeight: 900 }}>✓</span>}
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(300px,1fr))", gap: 22 }}>{filtered.map(l => <ListingCard key={l.id} l={l} setPage={setPage} />)}</div>
+      {children}
+    </button>
+  );
+
+  return (
+    <div style={{ maxWidth: 1280, margin: "0 auto", padding: "32px 24px" }}>
+      {/* Header */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 24 }}>
+        <div>
+          <h1 style={{ ...D, fontSize: 32, fontWeight: 800, marginBottom: 4 }}>Nabídka nemovitostí</h1>
+          <p style={{ color: "#888", fontSize: 13 }}>{filtered.length} z {listings.length} nemovitostí</p>
+        </div>
+        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+          <input placeholder="🔍  Hledat…" value={filters.search} onChange={setFE("search")}
+            style={{ padding: "10px 16px", borderRadius: 12, border: "1.5px solid #e0dbd4", fontSize: 14, fontFamily: "'DM Sans', sans-serif", width: 240 }} />
+          <button onClick={() => setSidebarOpen(s => !s)} style={{ display: "flex", alignItems: "center", gap: 7, padding: "10px 16px", borderRadius: 12, border: `1.5px solid ${sidebarOpen ? "#1a1a1a" : "#e0dbd4"}`, background: sidebarOpen ? "#1a1a1a" : "#fff", color: sidebarOpen ? "#fff" : "#555", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "'DM Sans', sans-serif" }}>
+            ⚙️ Filtry {activeCount > 0 && <span style={{ background: "#C9A84C", color: "#fff", borderRadius: 99, fontSize: 11, fontWeight: 700, padding: "1px 7px" }}>{activeCount}</span>}
+          </button>
+          {activeCount > 0 && <button onClick={resetFilters} style={{ padding: "10px 14px", borderRadius: 12, border: "1.5px solid #fee2e2", background: "#fff", color: "#991b1b", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "'DM Sans', sans-serif" }}>✕ Reset</button>}
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: sidebarOpen ? "260px 1fr" : "1fr", gap: 28 }}>
+        {/* Sidebar */}
+        {sidebarOpen && (
+          <div style={{ alignSelf: "start", position: "sticky", top: 76 }}>
+            <div style={{ background: "#fff", borderRadius: 20, border: "1px solid #ede9e3", padding: 22 }}>
+
+              <SidebarSection title="TYP NEMOVITOSTI">
+                {[{ v: "Vše", l: "Vše" }, { v: "APARTMENT", l: "🏢 Byt" }, { v: "HOUSE", l: "🏠 Dům" }, { v: "OFFICE", l: "🏗 Kancelář" }].map(t => (
+                  <CheckBtn key={t.v} active={filters.type === t.v} onClick={() => setF("type")(t.v)}>{t.l}</CheckBtn>
+                ))}
+              </SidebarSection>
+
+              <SidebarSection title="CENA (MIL. KČ)">
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  <div>
+                    <div style={{ fontSize: 11, color: "#bbb", marginBottom: 4 }}>Od</div>
+                    <input type="number" value={filters.priceMin} onChange={setFE("priceMin")} placeholder="0" style={{ width: "100%", padding: "9px 10px", borderRadius: 9, border: "1.5px solid #e0dbd4", fontSize: 13, fontFamily: "'DM Sans', sans-serif", boxSizing: "border-box" }} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 11, color: "#bbb", marginBottom: 4 }}>Do</div>
+                    <input type="number" value={filters.priceMax} onChange={setFE("priceMax")} placeholder="100" style={{ width: "100%", padding: "9px 10px", borderRadius: 9, border: "1.5px solid #e0dbd4", fontSize: 13, fontFamily: "'DM Sans', sans-serif", boxSizing: "border-box" }} />
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
+                  {[5, 10, 20, 50].map(v => (
+                    <button key={v} onClick={() => setFilters(f => ({ ...f, priceMax: v }))} style={{ padding: "4px 10px", borderRadius: 99, border: "1.5px solid #e0dbd4", background: +filters.priceMax === v ? "#1a1a1a" : "#fff", color: +filters.priceMax === v ? "#fff" : "#555", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "'DM Sans', sans-serif" }}>do {v}M</button>
+                  ))}
+                </div>
+              </SidebarSection>
+
+              <SidebarSection title="PLOCHA (M²)">
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  <div>
+                    <div style={{ fontSize: 11, color: "#bbb", marginBottom: 4 }}>Od</div>
+                    <input type="number" value={filters.sizeMin} onChange={setFE("sizeMin")} placeholder="0" style={{ width: "100%", padding: "9px 10px", borderRadius: 9, border: "1.5px solid #e0dbd4", fontSize: 13, fontFamily: "'DM Sans', sans-serif", boxSizing: "border-box" }} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 11, color: "#bbb", marginBottom: 4 }}>Do</div>
+                    <input type="number" value={filters.sizeMax} onChange={setFE("sizeMax")} placeholder="∞" style={{ width: "100%", padding: "9px 10px", borderRadius: 9, border: "1.5px solid #e0dbd4", fontSize: 13, fontFamily: "'DM Sans', sans-serif", boxSizing: "border-box" }} />
+                  </div>
+                </div>
+              </SidebarSection>
+
+              <SidebarSection title="POČET POKOJŮ (MIN.)">
+                <div style={{ display: "flex", gap: 6 }}>
+                  {["", "1", "2", "3", "4", "5+"].map(v => (
+                    <button key={v} onClick={() => setF("bedroomsMin")(v === "5+" ? "5" : v)} style={{ flex: 1, padding: "8px 4px", borderRadius: 9, border: `1.5px solid ${filters.bedroomsMin === (v === "5+" ? "5" : v) ? "#1a1a1a" : "#e0dbd4"}`, background: filters.bedroomsMin === (v === "5+" ? "5" : v) ? "#1a1a1a" : "#fff", color: filters.bedroomsMin === (v === "5+" ? "5" : v) ? "#fff" : "#555", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "'DM Sans', sans-serif" }}>{v || "Vše"}</button>
+                  ))}
+                </div>
+              </SidebarSection>
+
+              <SidebarSection title="LOKALITA / ČTVRŤ">
+                <select value={filters.district} onChange={setFE("district")} style={{ width: "100%", padding: "10px 12px", borderRadius: 10, border: "1.5px solid #e0dbd4", fontSize: 13, fontFamily: "'DM Sans', sans-serif", background: "#fff" }}>
+                  <option value="">Všechny čtvrti</option>
+                  {DISTRICTS.map(d => <option key={d} value={d}>{d}</option>)}
+                </select>
+              </SidebarSection>
+
+              <SidebarSection title="VYBAVENÍ">
+                {[{ key: "hasGarage", label: "🚗 Garáž" }, { key: "hasBalcony", label: "🏙 Balkón / terasa" }, { key: "hasGarden", label: "🌿 Zahrada" }, { key: "hasPool", label: "🏊 Bazén" }].map(item => (
+                  <CheckBtn key={item.key} active={filters[item.key]} onClick={setFB(item.key)}>{item.label}</CheckBtn>
+                ))}
+              </SidebarSection>
+
+              {activeCount > 0 && (
+                <button onClick={resetFilters} style={{ width: "100%", padding: "10px", borderRadius: 10, border: "1.5px solid #fee2e2", background: "#fff5f5", color: "#991b1b", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "'DM Sans', sans-serif" }}>
+                  ✕ Zrušit všechny filtry
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Výsledky */}
+        <div>
+          {filtered.length === 0 ? (
+            <div style={{ textAlign: "center", padding: "80px 0" }}>
+              <div style={{ fontSize: 48, marginBottom: 16 }}>🔍</div>
+              <h3 style={{ ...D, fontSize: 22, fontWeight: 700, marginBottom: 8 }}>Žádné výsledky</h3>
+              <p style={{ color: "#888", marginBottom: 20 }}>Zkuste upravit filtry nebo rozšířit hledání.</p>
+              <Btn onClick={resetFilters} variant="outline">Zrušit filtry</Btn>
+            </div>
+          ) : (
+            <div style={{ display: "grid", gridTemplateColumns: sidebarOpen ? "repeat(auto-fill,minmax(280px,1fr))" : "repeat(auto-fill,minmax(300px,1fr))", gap: 22 }}>
+              {filtered.map(l => <ListingCard key={l.id} l={l} setPage={setPage} />)}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 };
