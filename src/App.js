@@ -195,7 +195,7 @@ const ReservePage = ({ id, setPage, user }) => {
   const l = listings.find(x => x.id === id);
   const STEPS = ["Osobní údaje", "Smlouva", "Platba"];
   const [step, setStep] = useState("Osobní údaje");
-  const [form, setForm] = useState({ firstName: "", lastName: "", birthNumber: "", street: "", city: "", zip: "", phone: "" });
+  const [form, setForm] = useState({ firstName: "Jan", lastName: "Novák", birthNumber: "900101/1234", street: "Václavské náměstí 1", city: "Praha", zip: "110 00", phone: "+420 603 123 456" });
   const [viewingDone, setViewingDone] = useState(false);
   const [insolvencyOk, setInsolvencyOk] = useState(null);
   const [contractRead, setContractRead] = useState(false);
@@ -336,12 +336,20 @@ const LoginPage = ({ setPage, setUser }) => {
   const loginWith = (account) => {
     setLoading(true);
     setTimeout(() => {
-      // Ujisti se že demo účty existují v localStorage
       if (account.role !== "ADMIN") {
         const users = getUsers();
         if (!users.find(u => u.nickname === account.nickname)) {
           saveUsers([...users, account]);
         }
+      }
+      // Předvyplnit demo údaje kupujícího pro všechny nemovitosti
+      if (account.role === "BUYER") {
+        const demoBuyerData = { firstName: "Jan", lastName: "Novák", birthNumber: "900101/1234", street: "Václavské náměstí 1", city: "Praha", zip: "110 00", phone: "+420 603 123 456", reservationFee: 50000, reservationDate: new Date().toISOString() };
+        ["l1","l2","l3","l4"].forEach(id => {
+          if (!localStorage.getItem("vebre_buyer_data_" + id)) {
+            localStorage.setItem("vebre_buyer_data_" + id, JSON.stringify({ ...demoBuyerData, listingId: id }));
+          }
+        });
       }
       setUser(account);
       setPage(account.role === "SELLER" ? "seller-dash" : account.role === "ADMIN" ? "admin-dash" : "buyer-dash");
@@ -805,9 +813,9 @@ const LegalWorkflowPage = ({ id, setPage, user }) => {
   const [activeStep, setActiveStep] = useState("verification");
   const [completedSteps, setCompletedSteps] = useState(["reservation"]);
   const [financing, setFinancing] = useState(null);
-  const [ownAmount, setOwnAmount] = useState("");
-  const [mortgageAmount, setMortgageAmount] = useState("");
-  const [mortgageBank, setMortgageBank] = useState("");
+  const [ownAmount, setOwnAmount] = useState("5000000");
+  const [mortgageAmount, setMortgageAmount] = useState("7500000");
+  const [mortgageBank, setMortgageBank] = useState("Česká spořitelna");
   const [deadlineDays, setDeadlineDays] = useState(30);
   const [customDeadline, setCustomDeadline] = useState("");
   const [lvNumber, setLvNumber] = useState("");
@@ -825,10 +833,10 @@ const LegalWorkflowPage = ({ id, setPage, user }) => {
   const [keysHandedOver, setKeysHandedOver] = useState(false);
   const [handoverComplete, setHandoverComplete] = useState(false);
   const [lawyerSlot, setLawyerSlot] = useState(null);
-  const [lawyerForm, setLawyerForm] = useState({ name: `${buyer.firstName} ${buyer.lastName}`.trim(), email: "", phone: buyer.phone || "" });
+  const [lawyerForm, setLawyerForm] = useState({ name: `${buyer.firstName} ${buyer.lastName}`.trim(), email: "jan.novak@email.cz", phone: buyer.phone || "+420 603 123 456" });
   const [lawyerBooked, setLawyerBooked] = useState(false);
-  const [buyerComment, setBuyerComment] = useState("");
-  const [sellerComment, setSellerComment] = useState("");
+  const [buyerComment, setBuyerComment] = useState("Žádám o prodloužení lhůty pro doložení hypotéky na 45 dní.");
+  const [sellerComment, setSellerComment] = useState("Souhlasím s prodloužením lhůty. Ostatní podmínky jsou pro mě přijatelné.");
   const [commentsSent, setCommentsSent] = useState(false);
 
   if (!l) return null;
@@ -1819,7 +1827,7 @@ const BuyerDash = ({ setPage, user }) => {
 // ─── NEW LISTING PAGE ─────────────────────────────────────────────────────────
 const NewListingPage = ({ setPage, user }) => {
   const fileInputRef = useRef(null);
-  const [form, setForm] = useState({ title: "", address: "", district: "", propertyType: "APARTMENT", bedrooms: 2, bathrooms: 1, internalSize: 80, yearBuilt: 2000, askingPrice: "", description: "", hasGarage: false, hasBalcony: false, hasGarden: false, hasPool: false });
+  const [form, setForm] = useState({ title: "Prostorný byt 3+kk v centru Prahy", address: "Vodičkova 22, Praha 1 - Nové Město", district: "Nové Město", propertyType: "APARTMENT", bedrooms: 3, bathrooms: 1, internalSize: 95, yearBuilt: 2005, askingPrice: "12500000", description: "Světlý byt 3+kk v samém srdci Prahy. Nová kuchyně, parkety, zasklený balkón. Výborná dostupnost MHD, veškerá občanská vybavenost v okolí.", hasGarage: false, hasBalcony: true, hasGarden: false, hasPool: false });
   const [photos, setPhotos] = useState([]);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
