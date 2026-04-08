@@ -37,7 +37,7 @@ const saveUsers = (u) => localStorage.setItem("vebre_users", JSON.stringify(u));
 const getListings = () => { try { const s = localStorage.getItem("vebre_listings"); return s ? JSON.parse(s) : LISTINGS_DEFAULT; } catch { return LISTINGS_DEFAULT; } };
 const saveListings = (l) => localStorage.setItem("vebre_listings", JSON.stringify(l));
 const getBuyerData = (listingId) => { try { return JSON.parse(localStorage.getItem("vebre_buyer_data_" + listingId) || "null"); } catch { return null; } };
-const saveBuyerData = (listingId, data) => localStorage.setItem("vebre_buyer_data_" + listingId, JSON.stringify(data));
+
 
 // ─── UTILS ────────────────────────────────────────────────────────────────────
 const fmt = (n) => n >= 1e6 ? `${(n / 1e6).toFixed(1)}M Kč` : `${(n / 1e3).toFixed(0)}K Kč`;
