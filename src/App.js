@@ -308,12 +308,35 @@ const Nav = ({ setPage, user, setUser }) => (
 );
 
 // ─── LOGIN ────────────────────────────────────────────────────────────────────
+const DEMO_ACCOUNTS = [
+  { nickname: "demo_kupujici", password: "demo123", role: "BUYER", anonymousId: "BYR-0001", label: "🏠 Kupující", desc: "Prohlíží nemovitosti, podává nabídky, rezervuje", color: "#3b82f6" },
+  { nickname: "demo_prodavajici", password: "demo123", role: "SELLER", anonymousId: "SLR-0001", label: "🏗 Prodávající", desc: "Přidává inzeráty, spravuje nabídky", color: "#059669" },
+  { nickname: "admin", password: "admin123", role: "ADMIN", anonymousId: "ADM-001", label: "⚙️ Admin", desc: "Přehled celé platformy, uživatelé, inzeráty", color: "#7c3aed" },
+];
+
 const LoginPage = ({ setPage, setUser }) => {
   const [role, setRole] = useState("BUYER");
   const [nickname, setNickname] = useState("");
   const [pass, setPass] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
+  const loginWith = (account) => {
+    setLoading(true);
+    setTimeout(() => {
+      // Ujisti se že demo účty existují v localStorage
+      if (account.role !== "ADMIN") {
+        const users = getUsers();
+        if (!users.find(u => u.nickname === account.nickname)) {
+          saveUsers([...users, account]);
+        }
+      }
+      setUser(account);
+      setPage(account.role === "SELLER" ? "seller-dash" : account.role === "ADMIN" ? "admin-dash" : "buyer-dash");
+      setLoading(false);
+    }, 600);
+  };
+
   const login = () => {
     setError(""); if (!nickname.trim() || !pass) { setError("Vyplňte přezdívku a heslo."); return; }
     setLoading(true);
@@ -324,10 +347,37 @@ const LoginPage = ({ setPage, setUser }) => {
       setUser(found); setPage(found.role === "SELLER" ? "seller-dash" : "buyer-dash"); setLoading(false);
     }, 800);
   };
+
   return (
     <div style={{ minHeight: "calc(100vh - 60px)", display: "grid", gridTemplateColumns: "1fr 1fr" }}>
       <div style={{ background: "#1a1a1a", display: "flex", flexDirection: "column", justifyContent: "space-between", padding: 48 }}>
         <blockquote><p style={{ ...D, color: "#fff", fontSize: 24, fontWeight: 600, lineHeight: 1.5, marginBottom: 18 }}>"VEBRE mi ušetřilo přes 200 000 Kč na provizi."</p><footer style={{ color: "#888", fontSize: 13 }}>Tomáš Procházka · Prodal v Praze 2</footer></blockquote>
+
+        {/* Demo účty */}
+        <div>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "#555", letterSpacing: "0.08em", marginBottom: 14 }}>🧪 DEMO ÚČTY — VYZKOUŠEJTE PLATFORMU</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {DEMO_ACCOUNTS.map(acc => (
+              <button key={acc.nickname} onClick={() => loginWith(acc)} disabled={loading}
+                style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px", borderRadius: 12, border: `1px solid #333`, background: "#252525", cursor: "pointer", fontFamily: "'DM Sans', sans-serif", transition: "all 0.15s" }}
+                onMouseEnter={e => e.currentTarget.style.background = "#2e2e2e"}
+                onMouseLeave={e => e.currentTarget.style.background = "#252525"}>
+                <div style={{ textAlign: "left" }}>
+                  <div style={{ fontWeight: 700, fontSize: 13, color: "#fff", marginBottom: 2 }}>{acc.label}</div>
+                  <div style={{ fontSize: 11, color: "#666" }}>{acc.desc}</div>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <div style={{ textAlign: "right" }}>
+                    <div style={{ fontSize: 11, color: "#555", fontFamily: "monospace" }}>{acc.nickname}</div>
+                    <div style={{ fontSize: 11, color: "#555", fontFamily: "monospace" }}>{acc.password}</div>
+                  </div>
+                  <div style={{ width: 28, height: 28, borderRadius: 8, background: acc.color, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13 }}>→</div>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 18, textAlign: "center" }}>{[["50%", "Nižší provize"], ["94%", "Přesnost AI"], ["2,1 mld", "Objem transakcí"]].map(([v, lb]) => (<div key={lb}><div style={{ ...D, color: "#C9A84C", fontSize: 26, fontWeight: 800 }}>{v}</div><div style={{ color: "#666", fontSize: 12, marginTop: 3 }}>{lb}</div></div>))}</div>
       </div>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: 48 }}>
@@ -342,7 +392,6 @@ const LoginPage = ({ setPage, setUser }) => {
             <Input label="HESLO" type="password" value={pass} onChange={e => setPass(e.target.value)} placeholder="Vaše heslo" />
             {error && <div style={{ background: "#fee2e2", color: "#991b1b", borderRadius: 9, padding: "9px 13px", fontSize: 13, marginBottom: 14 }}>⚠️ {error}</div>}
             <Btn full onClick={login} disabled={loading}>{loading ? "Přihlašuji…" : "Přihlásit se →"}</Btn>
-            <p style={{ textAlign: "center", marginTop: 14, fontSize: 11, color: "#ddd" }}>Admin: <strong>admin</strong> / <strong>admin123</strong></p>
           </Card>
         </div>
       </div>
@@ -703,8 +752,362 @@ const SellerDash = ({ setPage, user }) => {
   );
 };
 
+// ─── KUPNÍ SMLOUVA ────────────────────────────────────────────────────────────
+const PurchaseContractPage = ({ id, setPage, user }) => {
+  const listings = getListings();
+  const l = listings.find(x => x.id === id) || listings[0];
+  const contractNo = "KS-" + (l?.id || "").toUpperCase() + "-" + new Date().getFullYear();
+  const today = new Date().toLocaleDateString("cs-CZ", { day: "numeric", month: "long", year: "numeric" });
+
+  // Demo buyer data
+  const buyer = { firstName: user?.nickname || "Jan", lastName: "Novák", birthNumber: "900101/1234", street: "Václavské náměstí 1", city: "Praha", zip: "110 00", phone: "+420 603 123 456" };
+
+  const [tab, setTab] = useState("contract");
+  const [buyerApproved, setBuyerApproved] = useState(false);
+  const [sellerApproved, setSellerApproved] = useState(false);
+  const [buyerComment, setBuyerComment] = useState("");
+  const [sellerComment, setSellerComment] = useState("");
+  const [buyerCommentSent, setBuyerCommentSent] = useState(false);
+  const [sellerCommentSent, setSellerCommentSent] = useState(false);
+  const [selectedSlot, setSelectedSlot] = useState(null);
+  const [lawyerForm, setLawyerForm] = useState({ name: "", email: "", phone: "", message: "" });
+  const [lawyerSent, setLawyerSent] = useState(false);
+
+  if (!l) return null;
+
+  // Generuj termíny na příštích 14 dní
+  const slots = [];
+  const now = new Date();
+  for (let d = 1; d <= 14; d++) {
+    const date = new Date(now);
+    date.setDate(now.getDate() + d);
+    if (date.getDay() !== 0 && date.getDay() !== 6) {
+      ["9:00", "10:30", "13:00", "14:30", "16:00"].forEach(time => {
+        if (Math.random() > 0.4) slots.push({ date: date.toLocaleDateString("cs-CZ", { weekday: "short", day: "numeric", month: "numeric" }), time, id: `${d}-${time}` });
+      });
+    }
+  }
+
+  const printContract = () => {
+    const win = window.open("", "_blank");
+    win.document.write(`<html><head><title>Kupní smlouva ${contractNo}</title>
+    <style>body{font-family:Georgia,serif;max-width:800px;margin:40px auto;color:#1a1a1a;line-height:1.8;font-size:14px}h1{font-size:22px;text-align:center;margin-bottom:4px}h2{font-size:15px;margin-top:28px;border-bottom:1px solid #ccc;padding-bottom:4px}.row{display:flex;justify-content:space-between;margin-bottom:4px}.label{color:#666;min-width:200px}.highlight{background:#f7f4ef;padding:14px 18px;border-radius:8px;margin:16px 0}.clause{margin-bottom:12px}.signatures{display:grid;grid-template-columns:1fr 1fr;gap:40px;margin-top:48px}.sig-box{border-top:1px solid #999;padding-top:10px;font-size:13px;color:#666}@media print{button{display:none}}</style>
+    </head><body>
+    <h1>KUPNÍ SMLOUVA</h1>
+    <div style="text-align:center;color:#666;font-size:13px;margin-bottom:32px">č. ${contractNo} · VEBRE · ${today}</div>
+    <h2>I. Smluvní strany</h2>
+    <div class="highlight">
+      <div class="row"><span class="label">Kupující:</span><span><strong>${buyer.firstName} ${buyer.lastName}</strong></span></div>
+      <div class="row"><span class="label">Rodné číslo:</span><span>${buyer.birthNumber}</span></div>
+      <div class="row"><span class="label">Adresa:</span><span>${buyer.street}, ${buyer.zip} ${buyer.city}</span></div>
+    </div>
+    <div class="highlight">
+      <div class="row"><span class="label">Prodávající:</span><span><strong>${l.seller.name}</strong></span></div>
+      <div class="row"><span class="label">Adresa:</span><span>${l.seller.address}</span></div>
+      <div class="row"><span class="label">E-mail:</span><span>${l.seller.email}</span></div>
+    </div>
+    <h2>II. Předmět koupě</h2>
+    <div class="highlight">
+      <div class="row"><span class="label">Nemovitost:</span><span><strong>${l.title}</strong></span></div>
+      <div class="row"><span class="label">Adresa:</span><span>${l.address}</span></div>
+      <div class="row"><span class="label">Plocha:</span><span>${l.internalSize} m²</span></div>
+      <div class="row"><span class="label">Rok výstavby:</span><span>${l.yearBuilt}</span></div>
+    </div>
+    <h2>III. Kupní cena</h2>
+    <div class="highlight">
+      <div class="row"><span class="label">Kupní cena:</span><span><strong>${fmtFull(l.askingPrice)}</strong></span></div>
+      <div class="row"><span class="label">Již uhrazeno (rezervace):</span><span>${fmtFull(l.reservationFee)}</span></div>
+      <div class="row"><span class="label">Zbývá doplatit:</span><span><strong>${fmtFull(l.askingPrice - l.reservationFee)}</strong></span></div>
+      <div class="row"><span class="label">Splatnost doplatku:</span><span>Do 30 dnů od podpisu smlouvy</span></div>
+    </div>
+    <h2>IV. Podmínky převodu</h2>
+    <div class="clause"><strong>1.</strong> Prodávající se zavazuje převést vlastnické právo k nemovitosti na kupujícího, a to bez věcných břemen a jiných závad.</div>
+    <div class="clause"><strong>2.</strong> Kupující se zavazuje uhradit kupní cenu v termínu stanoveném touto smlouvou.</div>
+    <div class="clause"><strong>3.</strong> Předání nemovitosti proběhne do 14 dnů od připsání kupní ceny na účet prodávajícího.</div>
+    <div class="clause"><strong>4.</strong> Návrh na vklad do katastru nemovitostí podá kupující do 5 pracovních dnů od podpisu smlouvy.</div>
+    <div class="clause"><strong>5.</strong> Náklady spojené s vkladem do katastru nemovitostí hradí kupující.</div>
+    <div class="clause"><strong>6.</strong> Prodávající prohlašuje, že nemovitost není zatížena žádným zástavním právem, věcným břemenem ani jiným právem třetích osob.</div>
+    <div class="clause"><strong>7.</strong> Tato smlouva se řídí právním řádem České republiky. Případné spory budou řešeny věcně příslušným soudem.</div>
+    <div class="signatures">
+      <div class="sig-box"><strong>${buyer.firstName} ${buyer.lastName}</strong><br/>Kupující<br/><br/>Datum: ${today}<br/>Podpis: ___________________</div>
+      <div class="sig-box"><strong>${l.seller.name}</strong><br/>Prodávající<br/><br/>Datum: ${today}<br/>Podpis: ___________________</div>
+    </div>
+    <div style="margin-top:40px;text-align:center;font-size:11px;color:#999">Vygenerováno platformou VEBRE · vebre.cz · ${today}</div>
+    <script>window.onload=()=>window.print()</script>
+    </body></html>`);
+    win.document.close();
+  };
+
+  const bothApproved = buyerApproved && sellerApproved;
+
+  return (
+    <div style={{ maxWidth: 900, margin: "40px auto", padding: "0 24px" }}>
+      <button onClick={() => setPage("buyer-dash")} style={{ background: "none", border: "none", cursor: "pointer", color: "#888", fontSize: 14, marginBottom: 26, fontFamily: "'DM Sans', sans-serif" }}>← Zpět na dashboard</button>
+
+      {/* Hlavička */}
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 28 }}>
+        <div>
+          <h1 style={{ ...D, fontSize: 28, fontWeight: 800, marginBottom: 4 }}>Kupní smlouva</h1>
+          <div style={{ fontSize: 13, color: "#888" }}>č. {contractNo} · {l.title}</div>
+        </div>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          {bothApproved ? <Badge color="green">✓ Obě strany schválily</Badge> : <Badge color="amber">Čeká na schválení</Badge>}
+        </div>
+      </div>
+
+      {/* Status bar */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 28 }}>
+        {[
+          { icon: "📄", label: "Smlouva vygenerována", done: true },
+          { icon: "✅", label: "Obě strany schválily", done: bothApproved },
+          { icon: "📅", label: "Termín u advokáta", done: !!selectedSlot && lawyerSent },
+        ].map((s, i) => (
+          <div key={i} style={{ background: s.done ? "#f0fdf4" : "#f7f4ef", border: `1px solid ${s.done ? "#6ee7b7" : "#e0dbd4"}`, borderRadius: 12, padding: "14px 16px", display: "flex", alignItems: "center", gap: 10 }}>
+            <span style={{ fontSize: 20 }}>{s.icon}</span>
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: s.done ? "#059669" : "#888" }}>{s.label}</div>
+              <div style={{ fontSize: 11, color: s.done ? "#059669" : "#bbb" }}>{s.done ? "Hotovo" : "Čeká"}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Záložky */}
+      <div style={{ display: "flex", gap: 4, marginBottom: 24, borderBottom: "1px solid #e0dbd4" }}>
+        {[{ id: "contract", label: "📄 Smlouva" }, { id: "comments", label: "💬 Připomínky" }, { id: "lawyer", label: "📅 Advokát" }].map(t => (
+          <button key={t.id} onClick={() => setTab(t.id)} style={{ padding: "10px 20px", background: "none", border: "none", borderBottom: tab === t.id ? "2px solid #1a1a1a" : "2px solid transparent", color: tab === t.id ? "#1a1a1a" : "#888", fontWeight: tab === t.id ? 700 : 500, fontSize: 13, cursor: "pointer", fontFamily: "'DM Sans', sans-serif", marginBottom: -1 }}>{t.label}</button>
+        ))}
+      </div>
+
+      {/* ── ZÁLOŽKA: SMLOUVA ── */}
+      {tab === "contract" && (
+        <div>
+          <Card style={{ padding: 28, marginBottom: 20 }}>
+            {/* Hlavička smlouvy */}
+            <div style={{ textAlign: "center", paddingBottom: 20, marginBottom: 20, borderBottom: "2px solid #1a1a1a" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginBottom: 8 }}>
+                <div style={{ width: 28, height: 28, background: "#1a1a1a", borderRadius: 7, display: "flex", alignItems: "center", justifyContent: "center" }}><span style={{ color: "#C9A84C", fontWeight: 900, fontSize: 13 }}>V</span></div>
+                <span style={{ fontWeight: 800, fontSize: 15, fontFamily: "'Playfair Display', serif" }}>VEBRE</span>
+              </div>
+              <h2 style={{ ...D, fontSize: 22, fontWeight: 800, margin: "0 0 4px" }}>KUPNÍ SMLOUVA</h2>
+              <div style={{ fontSize: 12, color: "#888" }}>č. {contractNo} · {today}</div>
+            </div>
+
+            {/* Strany */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 20 }}>
+              <div style={{ background: "#f7f4ef", borderRadius: 12, padding: 16 }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: "#999", marginBottom: 8, letterSpacing: "0.05em" }}>KUPUJÍCÍ</div>
+                <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 3 }}>{buyer.firstName} {buyer.lastName}</div>
+                <div style={{ fontSize: 12, color: "#666", marginBottom: 2 }}>RČ: {buyer.birthNumber}</div>
+                <div style={{ fontSize: 12, color: "#666" }}>{buyer.street}, {buyer.zip} {buyer.city}</div>
+              </div>
+              <div style={{ background: "#f0fdf4", borderRadius: 12, padding: 16 }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: "#999", marginBottom: 8, letterSpacing: "0.05em" }}>PRODÁVAJÍCÍ</div>
+                <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 3, color: "#059669" }}>{l.seller.name}</div>
+                <div style={{ fontSize: 12, color: "#059669", marginBottom: 2 }}>{l.seller.address}</div>
+                <div style={{ fontSize: 12, color: "#059669" }}>📧 {l.seller.email}</div>
+              </div>
+            </div>
+
+            {/* Předmět */}
+            <div style={{ background: "#f7f4ef", borderRadius: 12, padding: 16, marginBottom: 16 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: "#999", marginBottom: 8, letterSpacing: "0.05em" }}>PŘEDMĚT KOUPĚ</div>
+              <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>{l.title}</div>
+              <div style={{ fontSize: 12, color: "#666", marginBottom: 2 }}>📍 {l.address}</div>
+              <div style={{ display: "flex", gap: 16, fontSize: 12, color: "#888", marginTop: 6 }}>
+                <span>📐 {l.internalSize} m²</span><span>🛏 {l.bedrooms} pokoje</span><span>🏗 {l.yearBuilt}</span>
+              </div>
+            </div>
+
+            {/* Cena */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 20 }}>
+              <div style={{ border: "1.5px solid #e0dbd4", borderRadius: 12, padding: 14 }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: "#999", marginBottom: 5 }}>KUPNÍ CENA</div>
+                <div style={{ ...D, fontSize: 18, fontWeight: 800 }}>{fmtFull(l.askingPrice)}</div>
+              </div>
+              <div style={{ border: "1.5px solid #6ee7b7", borderRadius: 12, padding: 14, background: "#f0fdf4" }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: "#059669", marginBottom: 5 }}>UŽ UHRAZENO</div>
+                <div style={{ ...D, fontSize: 18, fontWeight: 800, color: "#059669" }}>{fmtFull(l.reservationFee)}</div>
+              </div>
+              <div style={{ border: "1.5px solid #C9A84C", borderRadius: 12, padding: 14, background: "#fffbf0" }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: "#92400e", marginBottom: 5 }}>DOPLATEK</div>
+                <div style={{ ...D, fontSize: 18, fontWeight: 800, color: "#C9A84C" }}>{fmtFull(l.askingPrice - l.reservationFee)}</div>
+              </div>
+            </div>
+
+            {/* Podmínky */}
+            <div style={{ marginBottom: 20 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: "#999", marginBottom: 10, letterSpacing: "0.05em" }}>KLÍČOVÉ PODMÍNKY</div>
+              {[
+                "Prodávající převádí nemovitost bez věcných břemen a jiných závad.",
+                "Doplatek kupní ceny splatný do 30 dnů od podpisu smlouvy.",
+                "Předání nemovitosti do 14 dnů od připsání kupní ceny.",
+                "Návrh na vklad do katastru podá kupující do 5 pracovních dnů.",
+                "Náklady spojené s vkladem do katastru hradí kupující.",
+              ].map((c, i) => (
+                <div key={i} style={{ display: "flex", gap: 10, marginBottom: 8, fontSize: 13, color: "#444", lineHeight: 1.5 }}>
+                  <span style={{ color: "#C9A84C", fontWeight: 700, flexShrink: 0 }}>{i + 1}.</span>
+                  <span>{c}</span>
+                </div>
+              ))}
+            </div>
+
+            {/* PDF tlačítko */}
+            <div style={{ borderTop: "1px solid #f0ede8", paddingTop: 18, display: "flex", gap: 10 }}>
+              <button onClick={printContract} style={{ display: "flex", alignItems: "center", gap: 8, background: "#1a1a1a", color: "#fff", border: "none", borderRadius: 10, padding: "10px 20px", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "'DM Sans', sans-serif" }}>
+                📄 Stáhnout / Vytisknout PDF
+              </button>
+            </div>
+          </Card>
+
+          {/* Schválení */}
+          <Card style={{ padding: 24 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 16 }}>Schválení smlouvy</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+              <div onClick={() => setBuyerApproved(v => !v)} style={{ padding: "16px", background: buyerApproved ? "#f0fdf4" : "#f7f4ef", borderRadius: 12, border: `1.5px solid ${buyerApproved ? "#6ee7b7" : "#e0dbd4"}`, cursor: "pointer" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <div style={{ width: 24, height: 24, borderRadius: 6, border: `2px solid ${buyerApproved ? "#059669" : "#ccc"}`, background: buyerApproved ? "#059669" : "#fff", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                    {buyerApproved && <span style={{ color: "#fff", fontSize: 13, fontWeight: 700 }}>✓</span>}
+                  </div>
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: 13 }}>Kupující</div>
+                    <div style={{ fontSize: 11, color: buyerApproved ? "#059669" : "#888" }}>{buyerApproved ? "Schváleno" : "Čeká na schválení"}</div>
+                  </div>
+                </div>
+              </div>
+              <div onClick={() => setSellerApproved(v => !v)} style={{ padding: "16px", background: sellerApproved ? "#f0fdf4" : "#f7f4ef", borderRadius: 12, border: `1.5px solid ${sellerApproved ? "#6ee7b7" : "#e0dbd4"}`, cursor: "pointer" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <div style={{ width: 24, height: 24, borderRadius: 6, border: `2px solid ${sellerApproved ? "#059669" : "#ccc"}`, background: sellerApproved ? "#059669" : "#fff", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                    {sellerApproved && <span style={{ color: "#fff", fontSize: 13, fontWeight: 700 }}>✓</span>}
+                  </div>
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: 13 }}>Prodávající</div>
+                    <div style={{ fontSize: 11, color: sellerApproved ? "#059669" : "#888" }}>{sellerApproved ? "Schváleno" : "Čeká na schválení"}</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            {bothApproved && (
+              <div style={{ marginTop: 16, background: "#f0fdf4", border: "1px solid #6ee7b7", borderRadius: 12, padding: "14px 18px", fontSize: 13, color: "#059669", fontWeight: 600 }}>
+                🎉 Obě strany smlouvu schválily! Nyní si rezervujte termín u advokáta.
+                <button onClick={() => setTab("lawyer")} style={{ marginLeft: 12, background: "#059669", color: "#fff", border: "none", borderRadius: 8, padding: "6px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "'DM Sans', sans-serif" }}>Rezervovat termín →</button>
+              </div>
+            )}
+          </Card>
+        </div>
+      )}
+
+      {/* ── ZÁLOŽKA: PŘIPOMÍNKY ── */}
+      {tab === "comments" && (
+        <div>
+          <Card style={{ padding: 24, marginBottom: 16 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4 }}>💬 Připomínky ke smlouvě</div>
+            <div style={{ fontSize: 12, color: "#888", marginBottom: 20 }}>Napište připomínky nebo požadavky na úpravu. Druhá strana je uvidí a může reagovat.</div>
+
+            {/* Připomínky kupujícího */}
+            <div style={{ marginBottom: 20 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#3b82f6", marginBottom: 8, letterSpacing: "0.05em" }}>🏠 KUPUJÍCÍ</div>
+              {buyerCommentSent && buyerComment ? (
+                <div style={{ background: "#dbeafe", borderRadius: 12, padding: "12px 16px", fontSize: 13, color: "#1e40af", marginBottom: 8 }}>
+                  <div style={{ fontWeight: 600, marginBottom: 3 }}>Odesláno {today}</div>
+                  <div>{buyerComment}</div>
+                </div>
+              ) : (
+                <div>
+                  <textarea value={buyerComment} onChange={e => setBuyerComment(e.target.value)} rows={3} placeholder="Napište připomínku nebo požadavek na úpravu smlouvy…" style={{ width: "100%", padding: "11px 13px", borderRadius: 11, border: "1.5px solid #e0dbd4", fontSize: 13, fontFamily: "'DM Sans', sans-serif", resize: "vertical", boxSizing: "border-box", marginBottom: 8 }} />
+                  <Btn small disabled={!buyerComment.trim()} onClick={() => setBuyerCommentSent(true)}>Odeslat připomínku</Btn>
+                </div>
+              )}
+            </div>
+
+            {/* Připomínky prodávajícího */}
+            <div style={{ paddingTop: 20, borderTop: "1px solid #f0ede8" }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#059669", marginBottom: 8, letterSpacing: "0.05em" }}>🏗 PRODÁVAJÍCÍ</div>
+              {sellerCommentSent && sellerComment ? (
+                <div style={{ background: "#d1fae5", borderRadius: 12, padding: "12px 16px", fontSize: 13, color: "#065f46", marginBottom: 8 }}>
+                  <div style={{ fontWeight: 600, marginBottom: 3 }}>Odesláno {today}</div>
+                  <div>{sellerComment}</div>
+                </div>
+              ) : (
+                <div>
+                  <textarea value={sellerComment} onChange={e => setSellerComment(e.target.value)} rows={3} placeholder="Reagujte na připomínky nebo přidejte vlastní…" style={{ width: "100%", padding: "11px 13px", borderRadius: 11, border: "1.5px solid #e0dbd4", fontSize: 13, fontFamily: "'DM Sans', sans-serif", resize: "vertical", boxSizing: "border-box", marginBottom: 8 }} />
+                  <Btn small variant="outline" disabled={!sellerComment.trim()} onClick={() => setSellerCommentSent(true)}>Odeslat reakci</Btn>
+                </div>
+              )}
+            </div>
+          </Card>
+
+          {buyerCommentSent && sellerCommentSent && (
+            <div style={{ background: "#fef3c7", border: "1px solid #fde68a", borderRadius: 12, padding: "14px 18px", fontSize: 13, color: "#92400e" }}>
+              💡 Obě strany zaslaly připomínky. Doporučujeme konzultaci s advokátem před finálním podpisem.
+              <button onClick={() => setTab("lawyer")} style={{ marginLeft: 12, background: "#92400e", color: "#fff", border: "none", borderRadius: 8, padding: "6px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "'DM Sans', sans-serif" }}>Rezervovat advokáta →</button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── ZÁLOŽKA: ADVOKÁT ── */}
+      {tab === "lawyer" && (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: 24 }}>
+          <div>
+            {/* Kalendář */}
+            <Card style={{ padding: 24, marginBottom: 16 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4 }}>📅 Dostupné termíny</div>
+              <div style={{ fontSize: 12, color: "#888", marginBottom: 18 }}>Advokátní kancelář VEBRE Legal · Praha 1, Národní 12</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 340, overflowY: "auto" }}>
+                {slots.slice(0, 20).map(slot => (
+                  <div key={slot.id} onClick={() => setSelectedSlot(slot)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", borderRadius: 10, border: `1.5px solid ${selectedSlot?.id === slot.id ? "#1a1a1a" : "#e0dbd4"}`, background: selectedSlot?.id === slot.id ? "#1a1a1a" : "#fff", cursor: "pointer", transition: "all 0.15s" }}>
+                    <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
+                      <span style={{ fontSize: 20 }}>📅</span>
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: 13, color: selectedSlot?.id === slot.id ? "#fff" : "#1a1a1a" }}>{slot.date}</div>
+                        <div style={{ fontSize: 12, color: selectedSlot?.id === slot.id ? "#aaa" : "#888" }}>{slot.time}</div>
+                      </div>
+                    </div>
+                    {selectedSlot?.id === slot.id && <span style={{ color: "#C9A84C", fontWeight: 700 }}>✓ Vybráno</span>}
+                  </div>
+                ))}
+              </div>
+            </Card>
+          </div>
+
+          {/* Kontaktní formulář */}
+          <div>
+            <Card style={{ padding: 22 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 16 }}>Kontaktní formulář</div>
+              {lawyerSent ? (
+                <div style={{ textAlign: "center", padding: "24px 0" }}>
+                  <div style={{ fontSize: 40, marginBottom: 12 }}>🎉</div>
+                  <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 6 }}>Termín rezervován!</div>
+                  <div style={{ fontSize: 12, color: "#888", lineHeight: 1.6 }}>Potvrzení bylo odesláno na váš e-mail. Advokát vás kontaktuje do 24 hodin.</div>
+                  {selectedSlot && <div style={{ marginTop: 14, background: "#f0fdf4", borderRadius: 10, padding: "10px 14px", fontSize: 13, color: "#059669", fontWeight: 600 }}>📅 {selectedSlot.date} v {selectedSlot.time}</div>}
+                </div>
+              ) : (
+                <div>
+                  {selectedSlot && <div style={{ background: "#f0fdf4", border: "1px solid #6ee7b7", borderRadius: 10, padding: "10px 14px", fontSize: 13, color: "#059669", fontWeight: 600, marginBottom: 16 }}>📅 {selectedSlot.date} v {selectedSlot.time}</div>}
+                  <Input label="JMÉNO A PŘÍJMENÍ" value={lawyerForm.name} onChange={e => setLawyerForm(f => ({ ...f, name: e.target.value }))} placeholder="Jan Novák" />
+                  <Input label="E-MAIL" value={lawyerForm.email} onChange={e => setLawyerForm(f => ({ ...f, email: e.target.value }))} placeholder="jan@email.cz" />
+                  <Input label="TELEFON" value={lawyerForm.phone} onChange={e => setLawyerForm(f => ({ ...f, phone: e.target.value }))} placeholder="+420 600 000 000" />
+                  <div style={{ marginBottom: 16 }}>
+                    <label style={{ fontSize: 11, fontWeight: 700, color: "#999", display: "block", marginBottom: 5, letterSpacing: "0.05em" }}>POZNÁMKA</label>
+                    <textarea value={lawyerForm.message} onChange={e => setLawyerForm(f => ({ ...f, message: e.target.value }))} rows={3} placeholder="Případné poznámky nebo dotazy…" style={{ width: "100%", padding: "11px 13px", borderRadius: 11, border: "1.5px solid #e0dbd4", fontSize: 13, fontFamily: "'DM Sans', sans-serif", resize: "none", boxSizing: "border-box" }} />
+                  </div>
+                  <Btn full disabled={!selectedSlot || !lawyerForm.name || !lawyerForm.email} onClick={() => setLawyerSent(true)}>
+                    Rezervovat termín →
+                  </Btn>
+                  <div style={{ fontSize: 11, color: "#bbb", textAlign: "center", marginTop: 10 }}>Advokát vás kontaktuje do 24 hodin</div>
+                </div>
+              )}
+            </Card>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 // ─── BUYER DASH ───────────────────────────────────────────────────────────────
-const BuyerDash = ({ setPage }) => {
+const BuyerDash = ({ setPage, user }) => {
   const [tab, setTab] = useState("overview");
   return (
     <div style={{ maxWidth: 1050, margin: "0 auto", padding: "28px 24px" }}>
@@ -713,10 +1116,49 @@ const BuyerDash = ({ setPage }) => {
         <Btn onClick={() => setPage("listings")}>Procházet nabídky →</Btn>
       </div>
       <div style={{ display: "flex", gap: 4, marginBottom: 20, borderBottom: "1px solid #e0dbd4" }}>
-        {[{ id: "overview", label: "Přehled" }, { id: "offers", label: "Moje nabídky" }].map(t => (<button key={t.id} onClick={() => setTab(t.id)} style={{ padding: "9px 18px", background: "none", border: "none", borderBottom: tab === t.id ? "2px solid #1a1a1a" : "2px solid transparent", color: tab === t.id ? "#1a1a1a" : "#888", fontWeight: tab === t.id ? 700 : 500, fontSize: 13, cursor: "pointer", fontFamily: "'DM Sans', sans-serif", marginBottom: -1 }}>{t.label}</button>))}
+        {[{ id: "overview", label: "Přehled" }, { id: "offers", label: "Moje nabídky" }, { id: "reservations", label: "Rezervace" }].map(t => (
+          <button key={t.id} onClick={() => setTab(t.id)} style={{ padding: "9px 18px", background: "none", border: "none", borderBottom: tab === t.id ? "2px solid #1a1a1a" : "2px solid transparent", color: tab === t.id ? "#1a1a1a" : "#888", fontWeight: tab === t.id ? 700 : 500, fontSize: 13, cursor: "pointer", fontFamily: "'DM Sans', sans-serif", marginBottom: -1 }}>{t.label}</button>
+        ))}
       </div>
-      {tab === "overview" && (<div style={{ textAlign: "center", padding: "48px 0" }}><div style={{ fontSize: 40, marginBottom: 16 }}>🏠</div><p style={{ color: "#888", marginBottom: 20 }}>Prozkoumejte nabídku nemovitostí</p><Btn onClick={() => setPage("listings")}>Procházet nabídky →</Btn></div>)}
+      {tab === "overview" && (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12 }}>
+          {[{ label: "Aktivní nabídky", value: 0, icon: "📋", color: "#d97706" }, { label: "Rezervace", value: 1, icon: "🔑", color: "#059669" }, { label: "Smlouvy", value: 1, icon: "📄", color: "#3b82f6" }].map(s => (
+            <Card key={s.label} style={{ padding: 18 }}><div style={{ fontSize: 20, marginBottom: 5 }}>{s.icon}</div><div style={{ ...D, fontSize: 24, fontWeight: 800, color: s.color }}>{s.value}</div><div style={{ fontSize: 12, color: "#999" }}>{s.label}</div></Card>
+          ))}
+        </div>
+      )}
       {tab === "offers" && (<div style={{ textAlign: "center", padding: "48px 0", color: "#aaa" }}>Zatím žádné nabídky</div>)}
+      {tab === "reservations" && (
+        <Card style={{ padding: 26 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 18 }}>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 2 }}>Historický byt v činžovním domě</div>
+              <div style={{ fontSize: 12, color: "#888" }}>📍 Nerudova 15, Malá Strana · #RSV-00492</div>
+            </div>
+            <Badge color="green">🔓 ZAPLACENO</Badge>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 20 }}>
+            <div style={{ background: "#f0fdf4", borderRadius: 12, padding: 14 }}>
+              <div style={{ fontSize: 10, color: "#888", fontWeight: 600, marginBottom: 6 }}>PRODÁVAJÍCÍ</div>
+              <div style={{ fontWeight: 700, color: "#059669" }}>Martin Dvořák</div>
+              <div style={{ fontSize: 12, color: "#059669" }}>📧 m.dvorak@email.cz</div>
+              <div style={{ fontSize: 12, color: "#059669" }}>📞 +420 603 111 222</div>
+            </div>
+            <div style={{ background: "#f7f4ef", borderRadius: 12, padding: 14 }}>
+              <div style={{ fontSize: 10, color: "#888", fontWeight: 600, marginBottom: 6 }}>REZERVAČNÍ POPLATEK</div>
+              <div style={{ ...D, fontSize: 20, fontWeight: 800 }}>50 000 Kč</div>
+              <div style={{ fontSize: 12, color: "#059669", marginTop: 4 }}>✓ Uhrazeno</div>
+            </div>
+          </div>
+          <div style={{ background: "#dbeafe", border: "1px solid #93c5fd", borderRadius: 12, padding: "14px 18px", marginBottom: 16, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 13, color: "#1e40af", marginBottom: 2 }}>📄 Kupní smlouva připravena k podpisu</div>
+              <div style={{ fontSize: 12, color: "#3b82f6" }}>Zkontrolujte návrh, přidejte připomínky a rezervujte termín u advokáta</div>
+            </div>
+            <Btn small onClick={() => setPage("purchase-contract-l2")}>Otevřít smlouvu →</Btn>
+          </div>
+        </Card>
+      )}
     </div>
   );
 };
@@ -938,6 +1380,7 @@ export default function App() {
     if (page === "buyer-dash") return <BuyerDash setPage={setPage} user={user} />;
     if (page === "admin-dash") return <AdminDash setPage={setPage} />;
     if (page === "new-listing") return <NewListingPage setPage={setPage} user={user} />;
+    if (page.startsWith("purchase-contract-")) return <PurchaseContractPage id={page.replace("purchase-contract-", "")} setPage={setPage} user={user} />;
     if (page.startsWith("listing-")) return <ListingDetail id={page.replace("listing-", "")} setPage={setPage} user={user} />;
     if (page.startsWith("reserve-")) return <ReservePage id={page.replace("reserve-", "")} setPage={setPage} user={user} />;
     return <HomePage setPage={setPage} />;
