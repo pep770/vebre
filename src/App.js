@@ -36,6 +36,8 @@ const getUsers = () => { try { return JSON.parse(localStorage.getItem("vebre_use
 const saveUsers = (u) => localStorage.setItem("vebre_users", JSON.stringify(u));
 const getListings = () => { try { const s = localStorage.getItem("vebre_listings"); return s ? JSON.parse(s) : LISTINGS_DEFAULT; } catch { return LISTINGS_DEFAULT; } };
 const saveListings = (l) => localStorage.setItem("vebre_listings", JSON.stringify(l));
+const getBuyerData = (listingId) => { try { return JSON.parse(localStorage.getItem("vebre_buyer_data_" + listingId) || "null"); } catch { return null; } };
+const saveBuyerData = (listingId, data) => localStorage.setItem("vebre_buyer_data_" + listingId, JSON.stringify(data));
 
 // ─── UTILS ────────────────────────────────────────────────────────────────────
 const fmt = (n) => n >= 1e6 ? `${(n / 1e6).toFixed(1)}M Kč` : `${(n / 1e3).toFixed(0)}K Kč`;
@@ -206,7 +208,17 @@ const ReservePage = ({ id, setPage, user }) => {
     if (!viewingDone) { setFormError("Potvrďte prosím, že jste absolvovali prohlídku."); return false; }
     setFormError(""); return true;
   };
-  const confirm = () => { setPaid(true); setTimeout(() => setStep("success"), 2500); };
+  const confirm = () => {
+    // Uložit osobní údaje kupujícího do localStorage pro použití ve smlouvách
+    localStorage.setItem("vebre_buyer_data_" + l.id, JSON.stringify({
+      ...form,
+      listingId: l.id,
+      reservationDate: new Date().toISOString(),
+      reservationFee: l.reservationFee,
+    }));
+    setPaid(true);
+    setTimeout(() => setStep("success"), 2500);
+  };
   if (step === "success") return (
     <div style={{ maxWidth: 720, margin: "40px auto", padding: "0 24px", textAlign: "center" }}>
       <div style={{ fontSize: 60, marginBottom: 18 }}>🔓</div>
@@ -761,21 +773,36 @@ const FINANCING_OPTIONS = [
 ];
 
 const WORKFLOW_STEPS = [
+  { id: "verification", label: "Prověření nemovitosti", icon: "🔍" },
   { id: "financing", label: "Financování", icon: "💰" },
   { id: "reservation", label: "Rezervační smlouva", icon: "📋" },
   { id: "future_contract", label: "Smlouva o smlouvě budoucí", icon: "📝" },
+  { id: "escrow_contract", label: "Smlouva o úschově", icon: "🔐" },
   { id: "purchase_contract", label: "Kupní smlouva", icon: "📄" },
-  { id: "escrow", label: "Úschova kupní ceny", icon: "🔐" },
+  { id: "escrow_payment", label: "Úhrada do úschovy", icon: "💳" },
   { id: "cadastre", label: "Návrh na vklad do KN", icon: "🏛️" },
+  { id: "handover", label: "Předání nemovitosti", icon: "🔑" },
 ];
 
 const LegalWorkflowPage = ({ id, setPage, user }) => {
   const listings = getListings();
   const l = listings.find(x => x.id === id) || listings[1];
   const today = new Date().toLocaleDateString("cs-CZ", { day: "numeric", month: "long", year: "numeric" });
-  const addDays = (days) => { const d = new Date(); d.setDate(d.getDate() + days); return d.toLocaleDateString("cs-CZ", { day: "numeric", month: "long", year: "numeric" }); };
+  const addDays = (days) => { const d = new Date(); d.setDate(d.getDate() + +days); return d.toLocaleDateString("cs-CZ", { day: "numeric", month: "long", year: "numeric" }); };
 
-  const [activeStep, setActiveStep] = useState("financing");
+  // Načtení uložených osobních údajů z rezervace
+  const savedBuyer = getBuyerData(id) || {};
+  const buyer = {
+    firstName: savedBuyer.firstName || user?.nickname || "",
+    lastName: savedBuyer.lastName || "",
+    birthNumber: savedBuyer.birthNumber || "",
+    street: savedBuyer.street || "",
+    city: savedBuyer.city || "Praha",
+    zip: savedBuyer.zip || "",
+    phone: savedBuyer.phone || "",
+  };
+
+  const [activeStep, setActiveStep] = useState("verification");
   const [completedSteps, setCompletedSteps] = useState(["reservation"]);
   const [financing, setFinancing] = useState(null);
   const [ownAmount, setOwnAmount] = useState("");
@@ -783,12 +810,22 @@ const LegalWorkflowPage = ({ id, setPage, user }) => {
   const [mortgageBank, setMortgageBank] = useState("");
   const [deadlineDays, setDeadlineDays] = useState(30);
   const [customDeadline, setCustomDeadline] = useState("");
-  const [futureContractApproved, setFutureContractApproved] = useState({ buyer: false, seller: false });
-  const [purchaseContractApproved, setPurchaseContractApproved] = useState({ buyer: false, seller: false });
-  const [escrowConfirmed, setEscrowConfirmed] = useState(false);
-  const [cadastreReady, setCadastreReady] = useState(false);
+  const [lvNumber, setLvNumber] = useState("");
+  const [parcelNumber, setParcelNumber] = useState("");
+  const [cadastralArea, setCadastralArea] = useState(l?.district || "");
+  const [coowners, setCoowners] = useState(false);
+  const [coownersDone, setCoownersDone] = useState(false);
+  const [encumbrances, setEncumbrances] = useState("");
+  const [futureApproved, setFutureApproved] = useState({ buyer: false, seller: false });
+  const [escrowContractApproved, setEscrowContractApproved] = useState({ buyer: false, seller: false });
+  const [purchaseApproved, setPurchaseApproved] = useState({ buyer: false, seller: false });
+  const [escrowSent, setEscrowSent] = useState(false);
+  const [handoverDate, setHandoverDate] = useState("");
+  const [meterReadings, setMeterReadings] = useState({ electricity: "", gas: "", water: "" });
+  const [keysHandedOver, setKeysHandedOver] = useState(false);
+  const [handoverComplete, setHandoverComplete] = useState(false);
   const [lawyerSlot, setLawyerSlot] = useState(null);
-  const [lawyerForm, setLawyerForm] = useState({ name: user?.nickname || "", email: "", phone: "" });
+  const [lawyerForm, setLawyerForm] = useState({ name: `${buyer.firstName} ${buyer.lastName}`.trim(), email: "", phone: buyer.phone || "" });
   const [lawyerBooked, setLawyerBooked] = useState(false);
   const [buyerComment, setBuyerComment] = useState("");
   const [sellerComment, setSellerComment] = useState("");
@@ -799,6 +836,7 @@ const LegalWorkflowPage = ({ id, setPage, user }) => {
   const fin = FINANCING_OPTIONS.find(f => f.id === financing);
   const effectiveDeadline = customDeadline || deadlineDays;
   const isHypoteka = financing === "mortgage_pending" || financing === "mortgage_approved" || financing === "combined";
+  const hypLhuta = Math.round(+effectiveDeadline * 0.5);
 
   const completeStep = (stepId) => {
     if (!completedSteps.includes(stepId)) setCompletedSteps(s => [...s, stepId]);
@@ -806,6 +844,18 @@ const LegalWorkflowPage = ({ id, setPage, user }) => {
     if (idx < WORKFLOW_STEPS.length - 1) setActiveStep(WORKFLOW_STEPS[idx + 1].id);
   };
 
+  // Generování termínů u advokáta
+  const lawyerSlots = [];
+  for (let d = 2; d <= 14; d++) {
+    const date = new Date(); date.setDate(date.getDate() + d);
+    if (date.getDay() !== 0 && date.getDay() !== 6) {
+      ["9:00", "10:30", "13:00", "15:00"].filter(() => Math.random() > 0.4).forEach(t => {
+        lawyerSlots.push({ id: `${d}-${t}`, date: date.toLocaleDateString("cs-CZ", { weekday: "short", day: "numeric", month: "numeric" }), time: t });
+      });
+    }
+  }
+
+  // Tisk dokumentů
   const printDoc = (title, content) => {
     const win = window.open("", "_blank");
     win.document.write(`<html><head><title>${title}</title>
@@ -814,141 +864,130 @@ const LegalWorkflowPage = ({ id, setPage, user }) => {
     win.document.close();
   };
 
-  const DocHeader = ({ title, no }) => `
-    <h1>${title}</h1>
-    <div class="meta">č. ${no} · Platforma VEBRE · ${today}</div>
-    <div class="warn">⚠️ Tento dokument je generován automaticky jako vzor. Před podpisem doporučujeme konzultaci s advokátem.</div>
-  `;
+  const DocHeader = (title, no) => `<h1>${title}</h1><div class="meta">č. ${no} · VEBRE · ${today}</div><div class="warn">⚠️ Vzorový dokument generovaný automaticky. Před podpisem doporučujeme konzultaci s advokátem.</div>`;
+  const BuyerBlock = () => `<div class="box"><div class="row"><span class="lbl">Kupující:</span><span class="val">${buyer.firstName} ${buyer.lastName}</span></div><div class="row"><span class="lbl">Rodné číslo:</span><span class="val">${buyer.birthNumber}</span></div><div class="row"><span class="lbl">Adresa:</span><span class="val">${buyer.street}, ${buyer.zip} ${buyer.city}</span></div><div class="row"><span class="lbl">Telefon:</span><span class="val">${buyer.phone}</span></div></div>`;
+  const SellerBlock = () => `<div class="box"><div class="row"><span class="lbl">Prodávající:</span><span class="val">${l.seller.name}</span></div><div class="row"><span class="lbl">Adresa:</span><span class="val">${l.seller.address}</span></div><div class="row"><span class="lbl">E-mail:</span><span class="val">${l.seller.email}</span></div><div class="row"><span class="lbl">Telefon:</span><span class="val">${l.seller.phone}</span></div></div>`;
+  const PropertyBlock = () => `<div class="box"><div class="row"><span class="lbl">Nemovitost:</span><span class="val">${l.title}</span></div><div class="row"><span class="lbl">Adresa:</span><span class="val">${l.address}</span></div><div class="row"><span class="lbl">List vlastnictví:</span><span class="val">${lvNumber || "–"}</span></div><div class="row"><span class="lbl">Parcelní číslo / č. jednotky:</span><span class="val">${parcelNumber || "–"}</span></div><div class="row"><span class="lbl">Katastrální území:</span><span class="val">${cadastralArea || "–"}</span></div><div class="row"><span class="lbl">Obec:</span><span class="val">${l.city}</span></div><div class="row"><span class="lbl">Plocha:</span><span class="val">${l.internalSize} m²</span></div></div>`;
+  const FinancingBlock = () => `<div class="box"><div class="row"><span class="lbl">Způsob financování:</span><span class="val">${fin?.label || "–"}</span></div>${financing === "combined" ? `<div class="row"><span class="lbl">Vlastní zdroje:</span><span class="val">${ownAmount ? fmtFull(+ownAmount) : "–"}</span></div><div class="row"><span class="lbl">Hypoteční úvěr:</span><span class="val">${mortgageAmount ? fmtFull(+mortgageAmount) : "–"}</span></div>` : ""}${isHypoteka ? `<div class="row"><span class="lbl">Poskytovatel hypotéky:</span><span class="val">${mortgageBank || "–"}</span></div>` : ""}<div class="row"><span class="lbl">Kupní cena celkem:</span><span class="val">${fmtFull(l.askingPrice)}</span></div></div>`;
+  const SigsBlock = () => `<div class="sigs"><div class="sig"><strong>${buyer.firstName} ${buyer.lastName}</strong><br/>Kupující<br/><br/>V ${l.city} dne ${today}<br/>Podpis: ___________________</div><div class="sig"><strong>${l.seller.name}</strong><br/>Prodávající<br/><br/>V ${l.city} dne ${today}<br/>Podpis: ___________________</div></div><div style="margin-top:40px;text-align:center;font-size:11px;color:#aaa">Vygenerováno platformou VEBRE · vebre.cz · ${today}</div>`;
 
-  const PartiesBlock = () => `
-    <h2>I. Smluvní strany</h2>
-    <div class="box">
-      <div class="row"><span class="lbl">Kupující:</span><span class="val">${user?.nickname || "Jan Novák"}</span></div>
-      <div class="row"><span class="lbl">Anonymní ID:</span><span class="val">${user?.anonymousId || "BYR-0001"}</span></div>
-    </div>
-    <div class="box">
-      <div class="row"><span class="lbl">Prodávající:</span><span class="val">${l.seller.name}</span></div>
-      <div class="row"><span class="lbl">Adresa:</span><span class="val">${l.seller.address}</span></div>
-      <div class="row"><span class="lbl">E-mail:</span><span class="val">${l.seller.email}</span></div>
-    </div>
-  `;
-
-  const PropertyBlock = () => `
-    <h2>II. Předmět</h2>
-    <div class="box">
-      <div class="row"><span class="lbl">Nemovitost:</span><span class="val">${l.title}</span></div>
-      <div class="row"><span class="lbl">Adresa:</span><span class="val">${l.address}</span></div>
-      <div class="row"><span class="lbl">Plocha:</span><span class="val">${l.internalSize} m²</span></div>
-      <div class="row"><span class="lbl">Rok výstavby:</span><span class="val">${l.yearBuilt}</span></div>
-    </div>
-  `;
-
-  const FinancingBlock = () => `
-    <h2>III. Financování</h2>
-    <div class="box">
-      <div class="row"><span class="lbl">Způsob financování:</span><span class="val">${fin?.label || "–"}</span></div>
-      ${financing === "combined" ? `<div class="row"><span class="lbl">Vlastní zdroje:</span><span class="val">${ownAmount ? fmtFull(+ownAmount) : "–"}</span></div><div class="row"><span class="lbl">Hypotéka:</span><span class="val">${mortgageAmount ? fmtFull(+mortgageAmount) : "–"}</span></div>` : ""}
-      ${isHypoteka ? `<div class="row"><span class="lbl">Banka:</span><span class="val">${mortgageBank || "–"}</span></div>` : ""}
-      <div class="row"><span class="lbl">Kupní cena:</span><span class="val">${fmtFull(l.askingPrice)}</span></div>
-      <div class="row"><span class="lbl">Lhůta pro uzavření KS:</span><span class="val">${effectiveDeadline} dní od podpisu</span></div>
-    </div>
-  `;
-
-  const SigsBlock = () => `
-    <div class="sigs">
-      <div class="sig"><strong>${user?.nickname || "Kupující"}</strong><br/>Kupující<br/><br/>Datum: ${today}<br/>Podpis: ___________________</div>
-      <div class="sig"><strong>${l.seller.name}</strong><br/>Prodávající<br/><br/>Datum: ${today}<br/>Podpis: ___________________</div>
-    </div>
-    <div style="margin-top:40px;text-align:center;font-size:11px;color:#aaa">Vygenerováno platformou VEBRE · vebre.cz · ${today}</div>
-  `;
-
-  // Generování PDF dokumentů
   const printReservation = () => printDoc("Rezervační smlouva", `
-    ${DocHeader({ title: "REZERVAČNÍ SMLOUVA", no: "RS-" + l.id.toUpperCase() + "-" + new Date().getFullYear() })}
-    ${PartiesBlock()} ${PropertyBlock()} ${FinancingBlock()}
+    ${DocHeader("REZERVAČNÍ SMLOUVA", "RS-" + l.id.toUpperCase() + "-" + new Date().getFullYear())}
+    <h2>I. Smluvní strany</h2>${BuyerBlock()}${SellerBlock()}
+    <h2>II. Předmět rezervace</h2>${PropertyBlock()}
+    <h2>III. Způsob financování</h2>${FinancingBlock()}
     <h2>IV. Rezervační poplatek</h2>
-    <div class="box">
-      <div class="row"><span class="lbl">Výše poplatku:</span><span class="val">${fmtFull(l.reservationFee)}</span></div>
-      <div class="row"><span class="lbl">Splatnost:</span><span class="val">Do 3 pracovních dnů od podpisu</span></div>
-      <div class="row"><span class="lbl">Účel:</span><span class="val">Rezervace nemovitosti, bude odečten od kupní ceny</span></div>
-    </div>
-    <h2>V. Podmínky</h2>
-    <div class="clause"><strong>1.</strong> Smlouva nabývá účinnosti uhrazením rezervačního poplatku.</div>
-    <div class="clause"><strong>2.</strong> Smluvní strany se zavazují uzavřít kupní smlouvu nejpozději do ${effectiveDeadline} dnů od nabytí účinnosti.</div>
-    ${isHypoteka ? `<div class="clause"><strong>3.</strong> <em>Podmínka hypotéky:</em> Kupující je povinen doložit schválení hypotéky do ${Math.round(+effectiveDeadline * 0.5)} dnů. Nedoloží-li, rezervační poplatek se vrací.</div>` : ""}
-    <div class="clause"><strong>${isHypoteka ? "4" : "3"}.</strong> Při odstoupení prodávajícím bude poplatek vrácen do 5 pracovních dnů.</div>
-    <div class="clause"><strong>${isHypoteka ? "5" : "4"}.</strong> Při odstoupení kupujícím bez závažného důvodu poplatek propadá.</div>
+    <div class="box"><div class="row"><span class="lbl">Výše poplatku:</span><span class="val">${fmtFull(l.reservationFee)}</span></div><div class="row"><span class="lbl">Splatnost:</span><span class="val">Do 3 pracovních dnů od podpisu smlouvy</span></div><div class="row"><span class="lbl">Uhrazen:</span><span class="val">${today}</span></div></div>
+    <h2>V. Podmínky a závazky stran</h2>
+    <div class="clause"><strong>1.</strong> Smlouva nabývá účinnosti uhrazením rezervačního poplatku připsáním na účet platformy VEBRE.</div>
+    <div class="clause"><strong>2.</strong> Smluvní strany se zavazují uzavřít smlouvu o smlouvě budoucí kupní nejpozději do ${effectiveDeadline} dnů od nabytí účinnosti, tj. do ${addDays(effectiveDeadline)}.</div>
+    ${isHypoteka ? `<div class="clause"><strong>3.</strong> <em>Rozvazovací podmínka — hypotéka:</em> Kupující je povinen doložit písemné rozhodnutí banky o schválení hypotečního úvěru do ${hypLhuta} dnů od nabytí účinnosti (tj. do ${addDays(hypLhuta)}). Nedoloží-li v této lhůtě, smlouva se ruší a rezervační poplatek se vrací kupujícímu v plné výši do 5 pracovních dnů.</div>` : ""}
+    <div class="clause"><strong>${isHypoteka ? "4" : "3"}.</strong> Kupující prohlašuje, že osobně absolvoval prohlídku nemovitosti a je s jejím stavem seznámen.</div>
+    <div class="clause"><strong>${isHypoteka ? "5" : "4"}.</strong> Kupní cena bude uhrazena prostřednictvím advokátní úschovy. Podmínky úschovy budou upraveny samostatnou smlouvou o advokátní úschově.</div>
+    <div class="clause"><strong>${isHypoteka ? "6" : "5"}.</strong> Při odstoupení prodávajícím bude rezervační poplatek vrácen kupujícímu do 5 pracovních dnů. Prodávající je dále povinen nahradit kupujícímu účelně vynaložené náklady.</div>
+    <div class="clause"><strong>${isHypoteka ? "7" : "6"}.</strong> Při odstoupení kupujícím bez závažného důvodu rezervační poplatek propadá ve prospěch prodávajícího jako smluvní pokuta.</div>
+    <div class="clause"><strong>${isHypoteka ? "8" : "7"}.</strong> Vlastnické právo kupujícího k nemovitosti vznikne zápisem do katastru nemovitostí, nikoliv podpisem kupní smlouvy.</div>
     ${SigsBlock()}
   `);
 
   const printFutureContract = () => printDoc("Smlouva o smlouvě budoucí kupní", `
-    ${DocHeader({ title: "SMLOUVA O SMLOUVĚ BUDOUCÍ KUPNÍ", no: "SSBK-" + l.id.toUpperCase() + "-" + new Date().getFullYear() })}
-    ${PartiesBlock()} ${PropertyBlock()} ${FinancingBlock()}
+    ${DocHeader("SMLOUVA O SMLOUVĚ BUDOUCÍ KUPNÍ", "SSBK-" + l.id.toUpperCase() + "-" + new Date().getFullYear())}
+    <h2>I. Smluvní strany</h2>${BuyerBlock()}${SellerBlock()}
+    <h2>II. Předmět budoucí koupě</h2>${PropertyBlock()}
+    <h2>III. Způsob financování</h2>${FinancingBlock()}
     <h2>IV. Závazek uzavřít kupní smlouvu</h2>
-    <div class="clause"><strong>1.</strong> Budoucí prodávající se zavazuje uzavřít s budoucím kupujícím kupní smlouvu na výše uvedenou nemovitost.</div>
-    <div class="clause"><strong>2.</strong> Kupní smlouva bude uzavřena nejpozději do <strong>${addDays(+effectiveDeadline)}</strong> (tj. do ${effectiveDeadline} dnů od podpisu této smlouvy).</div>
-    <div class="clause"><strong>3.</strong> Sjednaná kupní cena je <strong>${fmtFull(l.askingPrice)}</strong>. Na ni bude započten uhrazený rezervační poplatek ${fmtFull(l.reservationFee)}.</div>
-    ${isHypoteka ? `<div class="clause"><strong>4.</strong> Uzavření kupní smlouvy je podmíněno schválením hypotečního úvěru kupujícímu bankou ${mortgageBank || "–"}. Lhůta pro doložení: ${addDays(Math.round(+effectiveDeadline * 0.5))}.</div>` : ""}
+    <div class="clause"><strong>1.</strong> Budoucí prodávající se zavazuje uzavřít s budoucím kupujícím kupní smlouvu o převodu nemovitosti specifikované v čl. II. této smlouvy.</div>
+    <div class="clause"><strong>2.</strong> Kupní smlouva bude uzavřena nejpozději do <strong>${addDays(effectiveDeadline)}</strong>. Sjednaná kupní cena je <strong>${fmtFull(l.askingPrice)}</strong>.</div>
+    <div class="clause"><strong>3.</strong> Na kupní cenu bude započten uhrazený rezervační poplatek ve výši ${fmtFull(l.reservationFee)}. Zbývající část ve výši ${fmtFull(l.askingPrice - l.reservationFee)} bude uhrazena prostřednictvím advokátní úschovy.</div>
+    ${isHypoteka ? `<div class="clause"><strong>4.</strong> Uzavření kupní smlouvy je podmíněno schválením hypotečního úvěru kupujícímu bankou <strong>${mortgageBank || "–"}</strong>. Kupující je povinen doložit schválení hypotéky do ${addDays(hypLhuta)}. Nedoloží-li, smlouva se ruší bez nároku na smluvní pokutu.</div>` : ""}
     <h2>V. Úschova kupní ceny</h2>
-    <div class="clause">Kupní cena bude uhrazena prostřednictvím advokátní úschovy u VEBRE Legal, s.r.o., Praha 1. Uvolnění probíhá po zapsání vlastnického práva kupujícího v katastru nemovitostí.</div>
+    <div class="clause">Smluvní strany se dohodly, že kupní cena bude uhrazena prostřednictvím advokátní úschovy vedenou VEBRE Legal, s.r.o. Podmínky uvolnění budou upraveny smlouvou o advokátní úschově, kterou smluvní strany uzavřou nejpozději společně s kupní smlouvou.</div>
+    <div class="clause">Prostředky z úschovy budou uvolněny prodávajícímu až po doložení zápisu vlastnického práva kupujícího v katastru nemovitostí.</div>
+    ${isHypoteka ? `<h2>VI. Součinnost při hypotéce</h2><div class="clause">Prodávající se zavazuje poskytnout součinnost potřebnou pro zřízení zástavního práva banky k nemovitosti. Zástavní právo bude zapsáno do katastru nemovitostí současně s převodem vlastnického práva.</div>` : ""}
     ${SigsBlock()}
+  `);
+
+  const printEscrowContract = () => printDoc("Smlouva o advokátní úschově", `
+    ${DocHeader("SMLOUVA O ADVOKÁTNÍ ÚSCHOVĚ", "US-" + l.id.toUpperCase() + "-" + new Date().getFullYear())}
+    <h2>I. Smluvní strany</h2>
+    ${BuyerBlock()}${SellerBlock()}
+    <div class="box"><div class="row"><span class="lbl">Advokát (schovatel):</span><span class="val">VEBRE Legal, s.r.o.</span></div><div class="row"><span class="lbl">Adresa:</span><span class="val">Národní 12, Praha 1, 110 00</span></div><div class="row"><span class="lbl">IČO:</span><span class="val">12345678</span></div><div class="row"><span class="lbl">Číslo ČAK:</span><span class="val">12345</span></div></div>
+    <h2>II. Předmět úschovy</h2>
+    <div class="box"><div class="row"><span class="lbl">Výše úschovy:</span><span class="val">${fmtFull(l.askingPrice - l.reservationFee)}</span></div><div class="row"><span class="lbl">Úschovní účet:</span><span class="val">1234567890/2700</span></div><div class="row"><span class="lbl">IBAN:</span><span class="val">CZ65 2700 0000 0012 3456 7890</span></div><div class="row"><span class="lbl">Variabilní symbol:</span><span class="val">${("US" + l.id).toUpperCase()}</span></div></div>
+    <h2>III. Podmínky uvolnění</h2>
+    <div class="clause"><strong>1. Uvolnění kupujícímu (prodávajícímu):</strong> Advokát uvolní prostředky z úschovy prodávajícímu po předložení výpisu z katastru nemovitostí prokazujícího zapsání vlastnického práva kupujícího, a to do 3 pracovních dnů od předložení.</div>
+    <div class="clause"><strong>2. Vrácení kupujícímu:</strong> Advokát vrátí prostředky kupujícímu, pokud do ${addDays(+effectiveDeadline + 60)} dnů nebude předložen výpis z katastru dle bodu 1, nebo na základě písemné dohody obou stran.</div>
+    ${isHypoteka ? `<div class="clause"><strong>3. Hypoteční úvěr:</strong> Prostředky budou poukázány přímo bankou ${mortgageBank || "–"} na úschovní účet. Advokát potvrdí přijetí prostředků bance i kupujícímu.</div>` : ""}
+    <div class="clause"><strong>${isHypoteka ? "4" : "3"}.</strong> Odměna advokáta za vedení úschovy: 5 000 Kč (+ DPH), hradí kupující.</div>
+    <h2>IV. Závěrečná ustanovení</h2>
+    <div class="clause">Tato smlouva se řídí zákonem č. 89/2012 Sb. (občanský zákoník) a zákonem č. 85/1996 Sb. (zákon o advokacii).</div>
+    <div class="sigs"><div class="sig"><strong>${buyer.firstName} ${buyer.lastName}</strong><br/>Kupující<br/>Podpis: ___________________</div><div class="sig"><strong>${l.seller.name}</strong><br/>Prodávající<br/>Podpis: ___________________</div></div>
+    <div class="sig" style="margin-top:24px;max-width:300px"><strong>VEBRE Legal, s.r.o.</strong><br/>Advokát / schovatel<br/>Podpis a razítko: ___________________</div>
+    <div style="margin-top:40px;text-align:center;font-size:11px;color:#aaa">Vygenerováno platformou VEBRE · vebre.cz · ${today}</div>
   `);
 
   const printPurchaseContract = () => printDoc("Kupní smlouva", `
-    ${DocHeader({ title: "KUPNÍ SMLOUVA", no: "KS-" + l.id.toUpperCase() + "-" + new Date().getFullYear() })}
-    ${PartiesBlock()} ${PropertyBlock()} ${FinancingBlock()}
+    ${DocHeader("KUPNÍ SMLOUVA", "KS-" + l.id.toUpperCase() + "-" + new Date().getFullYear())}
+    <h2>I. Smluvní strany</h2>${BuyerBlock()}${SellerBlock()}
+    <h2>II. Předmět koupě</h2>${PropertyBlock()}
+    <h2>III. Způsob financování</h2>${FinancingBlock()}
     <h2>IV. Kupní cena a platební podmínky</h2>
-    <div class="box">
-      <div class="row"><span class="lbl">Kupní cena:</span><span class="val">${fmtFull(l.askingPrice)}</span></div>
-      <div class="row"><span class="lbl">Uhrazeno (rezervace):</span><span class="val">${fmtFull(l.reservationFee)}</span></div>
-      <div class="row"><span class="lbl">Doplatek přes úschovu:</span><span class="val">${fmtFull(l.askingPrice - l.reservationFee)}</span></div>
-      <div class="row"><span class="lbl">Splatnost doplatku:</span><span class="val">30 dnů od podpisu smlouvy na úschovní účet</span></div>
-    </div>
-    <h2>V. Podmínky převodu vlastnictví</h2>
-    <div class="clause"><strong>1.</strong> Prodávající převádí nemovitost na kupujícího bez věcných břemen a jiných závad.</div>
-    <div class="clause"><strong>2.</strong> Vlastnické právo přechází zápisem do katastru nemovitostí.</div>
-    <div class="clause"><strong>3.</strong> Předání nemovitosti proběhne do 14 dnů od připsání kupní ceny na úschovní účet.</div>
-    <div class="clause"><strong>4.</strong> Kupní cena bude uvolněna z advokátní úschovy po doložení zápisu v KN.</div>
-    <div class="clause"><strong>5.</strong> Návrh na vklad podá kupující do 5 pracovních dnů od podpisu smlouvy.</div>
+    <div class="box"><div class="row"><span class="lbl">Kupní cena:</span><span class="val">${fmtFull(l.askingPrice)}</span></div><div class="row"><span class="lbl">Uhrazeno (rezervace):</span><span class="val">${fmtFull(l.reservationFee)}</span></div><div class="row"><span class="lbl">Doplatek přes úschovu:</span><span class="val">${fmtFull(l.askingPrice - l.reservationFee)}</span></div><div class="row"><span class="lbl">Splatnost doplatku:</span><span class="val">30 dní od podpisu na úschovní účet VEBRE Legal</span></div></div>
+    <h2>V. Převod vlastnictví</h2>
+    <div class="clause"><strong>1.</strong> Vlastnické právo kupujícího k nemovitosti vzniká <strong>zápisem do katastru nemovitostí</strong>, nikoliv podpisem této smlouvy (§ 1105 OZ).</div>
+    <div class="clause"><strong>2.</strong> Prodávající se zavazuje převést nemovitost prosté věcných břemen, zástavních práv a jiných závad, s výjimkou zástavního práva banky ${isHypoteka ? mortgageBank || "–" : "–"} vzniklého na základě hypotečního úvěru kupujícího.</div>
+    <div class="clause"><strong>3.</strong> Kupní cena bude uvolněna z advokátní úschovy prodávajícímu po doložení zápisu vlastnického práva kupujícího v katastru nemovitostí.</div>
+    ${isHypoteka ? `<div class="clause"><strong>4.</strong> Zástavní právo banky ${mortgageBank || "–"} bude zapsáno do katastru nemovitostí současně s vlastnickým právem kupujícího. Prodávající uděluje souhlas se zřízením zástavního práva.</div>` : ""}
+    <h2>VI. Předání nemovitosti</h2>
+    <div class="clause">Prodávající předá nemovitost kupujícímu do 14 dnů od připsání kupní ceny na úschovní účet. O předání bude sepsán předávací protokol obsahující stav měřičů energií a počet předaných klíčů.</div>
+    <h2>VII. Návrh na vklad</h2>
+    <div class="clause">Návrh na povolení vkladu vlastnického práva podají smluvní strany prostřednictvím advokáta do 5 pracovních dnů od podpisu této smlouvy. Správní poplatek 2 000 Kč za každé vkládané právo hradí kupující.</div>
+    <div class="clause">Smluvní strany berou na vědomí, že po dobu řízení o povolení vkladu nemůže prodávající nemovitost zatížit ani s ní jinak nakládat.</div>
     ${SigsBlock()}
   `);
 
-  const printCadastre = () => printDoc("Návrh na vklad do katastru nemovitostí", `
-    ${DocHeader({ title: "NÁVRH NA POVOLENÍ VKLADU DO KATASTRU NEMOVITOSTÍ", no: "KN-" + l.id.toUpperCase() + "-" + new Date().getFullYear() })}
-    <h2>Katastrálnímu úřadu pro hlavní město Praha</h2>
-    <p>Katastrální pracoviště Praha</p>
+  const printCadastre = () => printDoc("Návrh na vklad do KN", `
+    ${DocHeader("NÁVRH NA POVOLENÍ VKLADU DO KATASTRU NEMOVITOSTÍ", "KN-" + l.id.toUpperCase() + "-" + new Date().getFullYear())}
+    <h2>Adresát</h2>
+    <div class="box"><div>Katastrální úřad pro hlavní město Prahu<br/>Katastrální pracoviště Praha<br/>Pod sídlištěm 1800/9a, 182 14 Praha 8</div></div>
     <h2>I. Účastníci řízení</h2>
-    ${PartiesBlock()}
+    <div class="box"><div class="row"><span class="lbl">1. účastník (nabyvatel):</span><span class="val">${buyer.firstName} ${buyer.lastName}, RČ: ${buyer.birthNumber}</span></div><div class="row"><span class="lbl">Adresa:</span><span class="val">${buyer.street}, ${buyer.zip} ${buyer.city}</span></div></div>
+    <div class="box"><div class="row"><span class="lbl">2. účastník (převodce):</span><span class="val">${l.seller.name}</span></div><div class="row"><span class="lbl">Adresa:</span><span class="val">${l.seller.address}</span></div></div>
     <h2>II. Nemovitost</h2>
-    ${PropertyBlock()}
+    <div class="box"><div class="row"><span class="lbl">List vlastnictví č.:</span><span class="val">${lvNumber || "DOPLNIT"}</span></div><div class="row"><span class="lbl">Parcelní číslo / č. jednotky:</span><span class="val">${parcelNumber || "DOPLNIT"}</span></div><div class="row"><span class="lbl">Katastrální území:</span><span class="val">${cadastralArea || "DOPLNIT"}</span></div><div class="row"><span class="lbl">Obec:</span><span class="val">${l.city}</span></div><div class="row"><span class="lbl">Adresa:</span><span class="val">${l.address}</span></div></div>
     <h2>III. Navrhovaný vklad</h2>
-    <div class="clause">Na základě kupní smlouvy ze dne ${today} navrhujeme, aby katastrální úřad povolil vklad vlastnického práva k výše uvedené nemovitosti ve prospěch kupujícího.</div>
+    <div class="clause">Na základě kupní smlouvy ze dne ${today} navrhujeme, aby katastrální úřad povolil vklad vlastnického práva k výše specifikované nemovitosti ve prospěch nabyvatele ${buyer.firstName} ${buyer.lastName}.</div>
+    ${isHypoteka ? `<div class="clause">Současně navrhujeme vklad zástavního práva ve prospěch banky ${mortgageBank || "–"} na základě zástavní smlouvy ze dne ${today}.</div>` : ""}
     <h2>IV. Přílohy</h2>
-    <div class="clause">1. Kupní smlouva (originál nebo úředně ověřená kopie)</div>
-    <div class="clause">2. Výpis z katastru nemovitostí (ne starší 3 měsíců)</div>
+    <div class="clause">1. Kupní smlouva — originál nebo úředně ověřená kopie (2×)</div>
+    <div class="clause">2. Výpis z katastru nemovitostí — ne starší 3 měsíců</div>
     <div class="clause">3. Snímek katastrální mapy</div>
-    <div class="clause">4. Doklad o zaplacení správního poplatku (2 000 Kč)</div>
-    <h2>V. Žádost</h2>
-    <div class="clause">Žádáme o povolení vkladu vlastnického práva ve prospěch kupujícího a o vyrozumění o provedení vkladu.</div>
+    ${isHypoteka ? `<div class="clause">4. Zástavní smlouva (2×)</div>` : ""}
+    <div class="clause">${isHypoteka ? "5" : "4"}. Doklad o zaplacení správního poplatku: ${isHypoteka ? "4 000 Kč (2× 2 000 Kč)" : "2 000 Kč"}</div>
+    <div class="sigs"><div class="sig"><strong>${buyer.firstName} ${buyer.lastName}</strong><br/>Kupující<br/>V ${l.city} dne ${today}<br/>Podpis: ___________________</div><div class="sig"><strong>${l.seller.name}</strong><br/>Prodávající<br/>V ${l.city} dne ${today}<br/>Podpis: ___________________</div></div>
+    <div style="margin-top:40px;text-align:center;font-size:11px;color:#aaa">Vygenerováno platformou VEBRE · vebre.cz · ${today}</div>
+  `);
+
+  const printHandover = () => printDoc("Předávací protokol", `
+    ${DocHeader("PŘEDÁVACÍ PROTOKOL NEMOVITOSTI", "PP-" + l.id.toUpperCase() + "-" + new Date().getFullYear())}
+    <h2>I. Smluvní strany</h2>${BuyerBlock()}${SellerBlock()}
+    <h2>II. Předávaná nemovitost</h2>${PropertyBlock()}
+    <h2>III. Stavy měřičů k datu předání (${handoverDate || today})</h2>
+    <div class="box"><div class="row"><span class="lbl">Elektřina (číslo měřiče):</span><span class="val">${meterReadings.electricity || "–"}</span></div><div class="row"><span class="lbl">Plyn (číslo měřiče):</span><span class="val">${meterReadings.gas || "–"}</span></div><div class="row"><span class="lbl">Voda (číslo měřiče):</span><span class="val">${meterReadings.water || "–"}</span></div></div>
+    <h2>IV. Předané klíče a přístupové prostředky</h2>
+    <div class="box"><div class="clause">Prodávající předal kupujícímu klíče a přístupové prostředky k nemovitosti. Kupující jejich převzetí potvrzuje.</div></div>
+    <h2>V. Stav nemovitosti</h2>
+    <div class="clause">Kupující prohlašuje, že nemovitost přebírá ve stavu, v jakém ji viděl při prohlídce, a nemá k jejímu stavu žádné výhrady, pokud není níže uvedeno jinak.</div>
+    <h2>VI. Závěr</h2>
+    <div class="clause">Podpisem tohoto protokolu potvrzují obě smluvní strany, že k předání nemovitosti došlo řádně a včas.</div>
     ${SigsBlock()}
   `);
 
-  // Generuj termíny u advokáta
-  const lawyerSlots = [];
-  for (let d = 2; d <= 14; d++) {
-    const date = new Date(); date.setDate(date.getDate() + d);
-    if (date.getDay() !== 0 && date.getDay() !== 6 && Math.random() > 0.3) {
-      ["9:00", "10:30", "13:00", "15:00"].filter(() => Math.random() > 0.4).forEach(t => {
-        lawyerSlots.push({ id: `${d}-${t}`, date: date.toLocaleDateString("cs-CZ", { weekday: "short", day: "numeric", month: "numeric" }), time: t });
-      });
-    }
-  }
-
-  // ── UI helpers ──
+  // UI helpers
   const StepCard = ({ children, title, subtitle }) => (
     <Card style={{ padding: 26, marginBottom: 16 }}>
-      {title && <div style={{ ...D, fontSize: 18, fontWeight: 800, marginBottom: 4 }}>{title}</div>}
-      {subtitle && <div style={{ fontSize: 13, color: "#888", marginBottom: 20 }}>{subtitle}</div>}
+      {title && <div style={{ ...D, fontSize: 20, fontWeight: 800, marginBottom: 4 }}>{title}</div>}
+      {subtitle && <div style={{ fontSize: 13, color: "#888", marginBottom: 20, lineHeight: 1.6 }}>{subtitle}</div>}
       {children}
     </Card>
   );
@@ -959,22 +998,25 @@ const LegalWorkflowPage = ({ id, setPage, user }) => {
         <div style={{ width: 24, height: 24, borderRadius: 6, border: `2px solid ${approved ? color : "#ccc"}`, background: approved ? color : "#fff", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
           {approved && <span style={{ color: "#fff", fontSize: 12, fontWeight: 800 }}>✓</span>}
         </div>
-        <div>
-          <div style={{ fontWeight: 700, fontSize: 13 }}>{label}</div>
-          <div style={{ fontSize: 11, color: approved ? color : "#aaa" }}>{approved ? "Schváleno" : "Čeká na schválení"}</div>
-        </div>
+        <div><div style={{ fontWeight: 700, fontSize: 13 }}>{label}</div><div style={{ fontSize: 11, color: approved ? color : "#aaa" }}>{approved ? "Schváleno" : "Čeká"}</div></div>
       </div>
     </div>
   );
 
   const PdfBtn = ({ onClick, label }) => (
-    <button onClick={onClick} style={{ display: "inline-flex", alignItems: "center", gap: 7, background: "#1a1a1a", color: "#fff", border: "none", borderRadius: 9, padding: "9px 18px", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "'DM Sans', sans-serif" }}>
+    <button onClick={onClick} style={{ display: "inline-flex", alignItems: "center", gap: 7, background: "#1a1a1a", color: "#fff", border: "none", borderRadius: 9, padding: "9px 18px", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "'DM Sans', sans-serif", marginBottom: 4 }}>
       📄 {label}
     </button>
   );
 
+  const InfoBox = ({ color = "blue", icon, children }) => {
+    const colors = { blue: ["#dbeafe", "#1e40af"], amber: ["#fef3c7", "#92400e"], green: ["#d1fae5", "#065f46"], red: ["#fee2e2", "#991b1b"] };
+    const [bg, tx] = colors[color];
+    return <div style={{ background: bg, border: `1px solid ${bg}`, borderRadius: 10, padding: "12px 16px", fontSize: 13, color: tx, marginBottom: 16, lineHeight: 1.6 }}>{icon} {children}</div>;
+  };
+
   return (
-    <div style={{ maxWidth: 960, margin: "32px auto", padding: "0 24px" }}>
+    <div style={{ maxWidth: 980, margin: "32px auto", padding: "0 24px" }}>
       <button onClick={() => setPage("buyer-dash")} style={{ background: "none", border: "none", cursor: "pointer", color: "#888", fontSize: 14, marginBottom: 24, fontFamily: "'DM Sans', sans-serif" }}>← Zpět na dashboard</button>
 
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 28 }}>
@@ -986,304 +1028,382 @@ const LegalWorkflowPage = ({ id, setPage, user }) => {
       </div>
 
       {/* Stepper */}
-      <div style={{ display: "flex", alignItems: "center", marginBottom: 32, overflowX: "auto", paddingBottom: 4 }}>
-        {WORKFLOW_STEPS.map((s, i) => {
-          const done = completedSteps.includes(s.id);
-          const active = activeStep === s.id;
-          return (
-            <div key={s.id} style={{ display: "flex", alignItems: "center", flexShrink: 0 }}>
-              <div onClick={() => (done || active) && setActiveStep(s.id)} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, cursor: done || active ? "pointer" : "default" }}>
-                <div style={{ width: 36, height: 36, borderRadius: "50%", background: done ? "#059669" : active ? "#1a1a1a" : "#e0dbd4", color: done || active ? "#fff" : "#aaa", display: "flex", alignItems: "center", justifyContent: "center", fontSize: done ? 14 : 16, fontWeight: 700 }}>{done ? "✓" : s.icon}</div>
-                <div style={{ fontSize: 10, fontWeight: active ? 700 : 400, color: active ? "#1a1a1a" : done ? "#059669" : "#aaa", textAlign: "center", maxWidth: 70, lineHeight: 1.3 }}>{s.label}</div>
+      <div style={{ background: "#fff", borderRadius: 16, border: "1px solid #ede9e3", padding: "18px 20px", marginBottom: 28, overflowX: "auto" }}>
+        <div style={{ display: "flex", alignItems: "center", minWidth: 700 }}>
+          {WORKFLOW_STEPS.map((s, i) => {
+            const done = completedSteps.includes(s.id);
+            const active = activeStep === s.id;
+            return (
+              <div key={s.id} style={{ display: "flex", alignItems: "center", flexShrink: 0 }}>
+                <div onClick={() => (done || active) && setActiveStep(s.id)} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 5, cursor: done || active ? "pointer" : "default", minWidth: 68 }}>
+                  <div style={{ width: 34, height: 34, borderRadius: "50%", background: done ? "#059669" : active ? "#1a1a1a" : "#e0dbd4", color: done || active ? "#fff" : "#aaa", display: "flex", alignItems: "center", justifyContent: "center", fontSize: done ? 13 : 14, fontWeight: 700 }}>{done ? "✓" : s.icon}</div>
+                  <div style={{ fontSize: 10, fontWeight: active ? 700 : 400, color: active ? "#1a1a1a" : done ? "#059669" : "#aaa", textAlign: "center", lineHeight: 1.3 }}>{s.label}</div>
+                </div>
+                {i < WORKFLOW_STEPS.length - 1 && <div style={{ width: 24, height: 2, background: done ? "#059669" : "#e0dbd4", margin: "0 2px", marginBottom: 18, flexShrink: 0 }} />}
               </div>
-              {i < WORKFLOW_STEPS.length - 1 && <div style={{ width: 32, height: 2, background: done ? "#059669" : "#e0dbd4", margin: "0 4px", marginBottom: 20, flexShrink: 0 }} />}
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
       </div>
 
-      {/* ── KROK 1: FINANCOVÁNÍ ── */}
-      {activeStep === "financing" && (
-        <div>
-          <StepCard title="💰 Způsob financování" subtitle="Vyberte jak budete kupní cenu hradit. Ovlivní obsah smluv a lhůty.">
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 20 }}>
-              {FINANCING_OPTIONS.map(f => (
-                <div key={f.id} onClick={() => { setFinancing(f.id); setDeadlineDays(f.deadlineDays); }} style={{ padding: 16, borderRadius: 12, border: `2px solid ${financing === f.id ? f.color : "#e0dbd4"}`, background: financing === f.id ? "#f7fffe" : "#fff", cursor: "pointer", transition: "all 0.15s" }}>
-                  <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4, color: financing === f.id ? f.color : "#1a1a1a" }}>{f.label}</div>
-                  <div style={{ fontSize: 12, color: "#888", marginBottom: 8 }}>{f.desc}</div>
-                  <div style={{ fontSize: 11, color: financing === f.id ? f.color : "#bbb", fontWeight: 600 }}>Výchozí lhůta: {f.deadlineDays} dní</div>
-                </div>
+      {/* ── KROK 1: PROVĚŘENÍ NEMOVITOSTI ── */}
+      {activeStep === "verification" && (
+        <StepCard title="🔍 Prověření nemovitosti" subtitle="Před podpisem jakékoli smlouvy je nutné ověřit právní stav nemovitosti v katastru. Toto je klíčový krok — odhalí zástavy, věcná břemena, exekuce nebo spoluvlastníky.">
+          <InfoBox color="amber" icon="⚠️">Vždy si vyžádejte aktuální výpis z katastru nemovitostí (LV) přímo z <a href="https://nahlizenidokn.cuzk.cz" target="_blank" rel="noreferrer" style={{ color: "#92400e" }}>nahlizenidokn.cuzk.cz</a>. Výpis musí být ne starší 3 měsíců.</InfoBox>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 20 }}>
+            <Input label="ČÍSLO LISTU VLASTNICTVÍ (LV)" value={lvNumber} onChange={e => setLvNumber(e.target.value)} placeholder="Např. 1234" />
+            <Input label="PARCELNÍ ČÍSLO / Č. JEDNOTKY" value={parcelNumber} onChange={e => setParcelNumber(e.target.value)} placeholder="Např. 567/1 nebo 567/1-89" />
+            <Input label="KATASTRÁLNÍ ÚZEMÍ" value={cadastralArea} onChange={e => setCadastralArea(e.target.value)} placeholder="Např. Vinohrady" />
+          </div>
+
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "#999", marginBottom: 8, letterSpacing: "0.05em" }}>VĚCNÁ BŘEMENA A ZÁSTAVY</div>
+            <textarea value={encumbrances} onChange={e => setEncumbrances(e.target.value)} rows={2} placeholder="Z výpisu z KN opište případná věcná břemena, zástavní práva nebo jiné závady (nebo napište 'Žádné')…" style={{ width: "100%", padding: "10px 12px", borderRadius: 10, border: "1.5px solid #e0dbd4", fontSize: 13, fontFamily: "'DM Sans', sans-serif", resize: "none", boxSizing: "border-box" }} />
+          </div>
+
+          <div style={{ marginBottom: 20, padding: "16px 18px", background: coowners ? "#fef3c7" : "#f7f4ef", borderRadius: 12, border: `1.5px solid ${coowners ? "#fde68a" : "#e0dbd4"}` }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "#999", marginBottom: 10, letterSpacing: "0.05em" }}>SPOLUVLASTNICTVÍ A PŘEDKUPNÍ PRÁVO</div>
+            <div style={{ display: "flex", gap: 10, marginBottom: coowners ? 12 : 0 }}>
+              {[{ v: false, l: "Nemovitost nemá spoluvlastníky" }, { v: true, l: "Má spoluvlastníky" }].map(opt => (
+                <button key={String(opt.v)} onClick={() => setCoowners(opt.v)} style={{ padding: "8px 16px", borderRadius: 9, border: `1.5px solid ${coowners === opt.v ? "#1a1a1a" : "#e0dbd4"}`, background: coowners === opt.v ? "#1a1a1a" : "#fff", color: coowners === opt.v ? "#fff" : "#555", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "'DM Sans', sans-serif" }}>{opt.l}</button>
               ))}
             </div>
-
-            {financing === "combined" && (
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
-                <Input label="VLASTNÍ ZDROJE (KČ)" value={ownAmount} onChange={e => setOwnAmount(e.target.value)} placeholder="Např. 5000000" />
-                <Input label="HYPOTÉKA (KČ)" value={mortgageAmount} onChange={e => setMortgageAmount(e.target.value)} placeholder="Např. 14500000" />
+            {coowners && (
+              <div>
+                <InfoBox color="amber" icon="⚠️">Nemovitost má spoluvlastníky. Dle § 1124 OZ mají zákonné předkupní právo. Prodávající jim musí nabídnout koupi za stejných podmínek. Doložte prosím písemné vzdání se předkupního práva nebo doklad o jeho vypořádání.</InfoBox>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }} onClick={() => setCoownersDone(v => !v)}>
+                  <div style={{ width: 22, height: 22, borderRadius: 6, border: `2px solid ${coownersDone ? "#059669" : "#ccc"}`, background: coownersDone ? "#059669" : "#fff", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                    {coownersDone && <span style={{ color: "#fff", fontSize: 12, fontWeight: 800 }}>✓</span>}
+                  </div>
+                  <span style={{ fontSize: 13, fontWeight: 600 }}>Předkupní právo spoluvlastníků bylo vypořádáno</span>
+                </div>
               </div>
             )}
-            {isHypoteka && (
-              <div style={{ marginBottom: 16 }}>
-                <Input label="BANKA / POSKYTOVATEL HYPOTÉKY" value={mortgageBank} onChange={e => setMortgageBank(e.target.value)} placeholder="Např. Česká spořitelna, Komerční banka…" />
-                {financing === "mortgage_approved" && (
-                  <div style={{ background: "#dbeafe", border: "1px solid #93c5fd", borderRadius: 10, padding: "12px 16px", fontSize: 13, color: "#1e40af", marginBottom: 12 }}>
-                    ℹ️ Do rezervační smlouvy bude zahrnuta podmínka platnosti schválení hypotéky. Doporučujeme přiložit potvrzení banky.
-                  </div>
-                )}
-                {financing === "mortgage_pending" && (
-                  <div style={{ background: "#fef3c7", border: "1px solid #fde68a", borderRadius: 10, padding: "12px 16px", fontSize: 13, color: "#92400e", marginBottom: 12 }}>
-                    ⚠️ Rezervační smlouva bude obsahovat rozvazovací podmínku — pokud hypotéka nebude schválena do {Math.round(deadlineDays * 0.5)} dní, rezervační poplatek bude vrácen.
-                  </div>
-                )}
-              </div>
-            )}
+          </div>
 
-            <div style={{ marginBottom: 20 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: "#999", marginBottom: 8, letterSpacing: "0.05em" }}>LHŮTA PRO UZAVŘENÍ KUPNÍ SMLOUVY</div>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
-                {[30, 45, 60, 90].map(d => (
-                  <button key={d} onClick={() => { setDeadlineDays(d); setCustomDeadline(""); }} style={{ padding: "8px 16px", borderRadius: 10, border: `1.5px solid ${deadlineDays === d && !customDeadline ? "#1a1a1a" : "#e0dbd4"}`, background: deadlineDays === d && !customDeadline ? "#1a1a1a" : "#fff", color: deadlineDays === d && !customDeadline ? "#fff" : "#555", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "'DM Sans', sans-serif" }}>{d} dní</button>
-                ))}
-                <input type="number" value={customDeadline} onChange={e => setCustomDeadline(e.target.value)} placeholder="Vlastní…" style={{ width: 100, padding: "8px 12px", borderRadius: 10, border: `1.5px solid ${customDeadline ? "#1a1a1a" : "#e0dbd4"}`, fontSize: 13, fontFamily: "'DM Sans', sans-serif" }} />
-              </div>
-              {financing && <div style={{ fontSize: 12, color: "#888" }}>Kupní smlouva musí být podepsána nejpozději: <strong>{addDays(+effectiveDeadline)}</strong></div>}
-            </div>
-
-            <Btn disabled={!financing} onClick={() => completeStep("financing")}>Potvrdit financování →</Btn>
-          </StepCard>
-        </div>
+          <Btn disabled={!lvNumber || !parcelNumber || (coowners && !coownersDone)} onClick={() => completeStep("verification")}>
+            Prověření dokončeno, pokračovat →
+          </Btn>
+        </StepCard>
       )}
 
-      {/* ── KROK 2: REZERVAČNÍ SMLOUVA ── */}
+      {/* ── KROK 2: FINANCOVÁNÍ ── */}
+      {activeStep === "financing" && (
+        <StepCard title="💰 Způsob financování" subtitle="Vyberte způsob úhrady kupní ceny. Ovlivní obsah smluv, lhůty a postup při hypotéce.">
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 20 }}>
+            {FINANCING_OPTIONS.map(f => (
+              <div key={f.id} onClick={() => { setFinancing(f.id); setDeadlineDays(f.deadlineDays); }} style={{ padding: 16, borderRadius: 12, border: `2px solid ${financing === f.id ? f.color : "#e0dbd4"}`, background: financing === f.id ? "#f7fffe" : "#fff", cursor: "pointer", transition: "all 0.15s" }}>
+                <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4, color: financing === f.id ? f.color : "#1a1a1a" }}>{f.label}</div>
+                <div style={{ fontSize: 12, color: "#888", marginBottom: 6 }}>{f.desc}</div>
+                <div style={{ fontSize: 11, color: financing === f.id ? f.color : "#bbb", fontWeight: 600 }}>Výchozí lhůta pro KS: {f.deadlineDays} dní</div>
+              </div>
+            ))}
+          </div>
+
+          {financing === "combined" && (
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 14 }}>
+              <Input label="VLASTNÍ ZDROJE (KČ)" value={ownAmount} onChange={e => setOwnAmount(e.target.value)} placeholder="Např. 5 000 000" />
+              <Input label="HYPOTEČNÍ ÚVĚR (KČ)" value={mortgageAmount} onChange={e => setMortgageAmount(e.target.value)} placeholder="Např. 14 500 000" />
+            </div>
+          )}
+          {isHypoteka && (
+            <div style={{ marginBottom: 14 }}>
+              <Input label="BANKA / POSKYTOVATEL HYPOTÉKY" value={mortgageBank} onChange={e => setMortgageBank(e.target.value)} placeholder="Např. Česká spořitelna, Komerční banka…" />
+              {financing === "mortgage_pending" && <InfoBox color="amber" icon="⚠️">Rezervační smlouva bude obsahovat rozvazovací podmínku. Nedoložíte-li schválení hypotéky do {Math.round(+deadlineDays * 0.5)} dní, smlouva se ruší a rezervační poplatek se vrací v plné výši.</InfoBox>}
+              {financing === "mortgage_approved" && <InfoBox color="blue" icon="ℹ️">Do smlouvy bude zahrnuta podmínka platnosti předschválení. Doporučujeme přiložit potvrzení banky. Pamatujte, že při hypotéce banka požaduje zástavní právo k nemovitosti.</InfoBox>}
+            </div>
+          )}
+
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "#999", marginBottom: 8, letterSpacing: "0.05em" }}>LHŮTA PRO UZAVŘENÍ KUPNÍ SMLOUVY</div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+              {[30, 45, 60, 90].map(d => (
+                <button key={d} onClick={() => { setDeadlineDays(d); setCustomDeadline(""); }} style={{ padding: "8px 16px", borderRadius: 10, border: `1.5px solid ${deadlineDays === d && !customDeadline ? "#1a1a1a" : "#e0dbd4"}`, background: deadlineDays === d && !customDeadline ? "#1a1a1a" : "#fff", color: deadlineDays === d && !customDeadline ? "#fff" : "#555", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "'DM Sans', sans-serif" }}>{d} dní</button>
+              ))}
+              <input type="number" value={customDeadline} onChange={e => setCustomDeadline(e.target.value)} placeholder="Vlastní…" style={{ width: 100, padding: "8px 12px", borderRadius: 10, border: `1.5px solid ${customDeadline ? "#1a1a1a" : "#e0dbd4"}`, fontSize: 13, fontFamily: "'DM Sans', sans-serif" }} />
+            </div>
+            {financing && <div style={{ fontSize: 12, color: "#666" }}>Kupní smlouva musí být podepsána nejpozději: <strong>{addDays(+effectiveDeadline)}</strong></div>}
+          </div>
+
+          <Btn disabled={!financing || (isHypoteka && !mortgageBank)} onClick={() => completeStep("financing")}>Potvrdit způsob financování →</Btn>
+        </StepCard>
+      )}
+
+      {/* ── KROK 3: REZERVAČNÍ SMLOUVA ── */}
       {activeStep === "reservation" && (
-        <StepCard title="📋 Rezervační smlouva" subtitle="Smlouva již byla uzavřena a rezervační poplatek uhrazen.">
+        <StepCard title="📋 Rezervační smlouva" subtitle="Smlouva byla uzavřena a rezervační poplatek uhrazen. Níže je shrnutí podmínek.">
           <div style={{ background: "#f0fdf4", border: "1px solid #6ee7b7", borderRadius: 12, padding: "16px 20px", marginBottom: 20, display: "flex", gap: 14, alignItems: "center" }}>
             <span style={{ fontSize: 28 }}>✅</span>
             <div>
-              <div style={{ fontWeight: 700, fontSize: 14, color: "#059669", marginBottom: 2 }}>Rezervační smlouva uzavřena</div>
+              <div style={{ fontWeight: 700, fontSize: 14, color: "#059669", marginBottom: 2 }}>Rezervační smlouva uzavřena a účinná</div>
               <div style={{ fontSize: 12, color: "#059669" }}>Rezervační poplatek {fmtFull(l.reservationFee)} uhrazen · {today}</div>
             </div>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 20 }}>
-            <div style={{ background: "#f7f4ef", borderRadius: 12, padding: 14 }}>
-              <div style={{ fontSize: 10, color: "#999", fontWeight: 600, marginBottom: 5 }}>KUPNÍ CENA</div>
-              <div style={{ ...D, fontSize: 17, fontWeight: 800 }}>{fmtFull(l.askingPrice)}</div>
-            </div>
-            <div style={{ background: "#f7f4ef", borderRadius: 12, padding: 14 }}>
-              <div style={{ fontSize: 10, color: "#999", fontWeight: 600, marginBottom: 5 }}>FINANCOVÁNÍ</div>
-              <div style={{ fontWeight: 700, fontSize: 13 }}>{fin?.label || "–"}</div>
-            </div>
-            <div style={{ background: "#f7f4ef", borderRadius: 12, padding: 14 }}>
-              <div style={{ fontSize: 10, color: "#999", fontWeight: 600, marginBottom: 5 }}>LHŮTA KS</div>
-              <div style={{ fontWeight: 700, fontSize: 13 }}>{addDays(+effectiveDeadline)}</div>
-            </div>
+            {[{ l: "KUPNÍ CENA", v: fmtFull(l.askingPrice) }, { l: "FINANCOVÁNÍ", v: fin?.label || "–" }, { l: "LHŮTA PRO KS", v: addDays(+effectiveDeadline) }].map(item => (
+              <div key={item.l} style={{ background: "#f7f4ef", borderRadius: 12, padding: 14 }}><div style={{ fontSize: 10, color: "#999", fontWeight: 600, marginBottom: 5 }}>{item.l}</div><div style={{ fontWeight: 700, fontSize: 13 }}>{item.v}</div></div>
+            ))}
           </div>
-          {isHypoteka && (
-            <div style={{ background: "#fef3c7", border: "1px solid #fde68a", borderRadius: 10, padding: "12px 16px", marginBottom: 20, fontSize: 13, color: "#92400e" }}>
-              🏦 Podmínka hypotéky: Schválení musí být doloženo do <strong>{addDays(Math.round(+effectiveDeadline * 0.5))}</strong>
-            </div>
-          )}
-          <div style={{ display: "flex", gap: 10 }}>
+          {isHypoteka && <InfoBox color="amber" icon="🏦">Podmínka hypotéky: Schválení musí být doloženo do <strong>{addDays(hypLhuta)}</strong>. Po uplynutí lhůty bez doložení se smlouva ruší a poplatek se vrací.</InfoBox>}
+          {buyer.firstName && <InfoBox color="blue" icon="👤">Osobní údaje načteny z rezervace: <strong>{buyer.firstName} {buyer.lastName}</strong>, RČ: {buyer.birthNumber}. Budou automaticky použity ve všech smlouvách.</InfoBox>}
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
             <PdfBtn onClick={printReservation} label="Stáhnout rezervační smlouvu (PDF)" />
             <Btn onClick={() => completeStep("reservation")}>Pokračovat →</Btn>
           </div>
         </StepCard>
       )}
 
-      {/* ── KROK 3: SSBK ── */}
+      {/* ── KROK 4: SSBK ── */}
       {activeStep === "future_contract" && (
-        <div>
-          <StepCard title="📝 Smlouva o smlouvě budoucí kupní" subtitle="Obě strany se zaváží uzavřít kupní smlouvu. Obsahuje přesné podmínky a lhůty.">
-            <div style={{ marginBottom: 20 }}>
-              {[
-                { label: "Termín uzavření KS", value: addDays(+effectiveDeadline) },
-                { label: "Kupní cena", value: fmtFull(l.askingPrice) },
-                { label: "Způsob financování", value: fin?.label || "–" },
-                { label: "Úschova kupní ceny", value: "VEBRE Legal, s.r.o." },
-                isHypoteka && { label: "Lhůta pro doložení hypotéky", value: addDays(Math.round(+effectiveDeadline * 0.5)) },
-              ].filter(Boolean).map(row => (
-                <div key={row.label} style={{ display: "flex", justifyContent: "space-between", padding: "10px 0", borderBottom: "1px solid #f0ede8", fontSize: 13 }}>
-                  <span style={{ color: "#888" }}>{row.label}</span>
-                  <span style={{ fontWeight: 700 }}>{row.value}</span>
-                </div>
-              ))}
-            </div>
-
-            <div style={{ marginBottom: 20 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: "#999", marginBottom: 10, letterSpacing: "0.05em" }}>PŘIPOMÍNKY KE SMLOUVĚ</div>
-              {commentsSent ? (
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                  {buyerComment && <div style={{ background: "#dbeafe", borderRadius: 10, padding: 14, fontSize: 13, color: "#1e40af" }}><strong>Kupující:</strong> {buyerComment}</div>}
-                  {sellerComment && <div style={{ background: "#d1fae5", borderRadius: 10, padding: 14, fontSize: 13, color: "#065f46" }}><strong>Prodávající:</strong> {sellerComment}</div>}
-                </div>
-              ) : (
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                  <div>
-                    <div style={{ fontSize: 11, color: "#3b82f6", fontWeight: 600, marginBottom: 6 }}>KUPUJÍCÍ</div>
-                    <textarea value={buyerComment} onChange={e => setBuyerComment(e.target.value)} rows={3} placeholder="Vaše připomínky…" style={{ width: "100%", padding: "10px 12px", borderRadius: 10, border: "1.5px solid #e0dbd4", fontSize: 13, fontFamily: "'DM Sans', sans-serif", resize: "none", boxSizing: "border-box" }} />
-                  </div>
-                  <div>
-                    <div style={{ fontSize: 11, color: "#059669", fontWeight: 600, marginBottom: 6 }}>PRODÁVAJÍCÍ</div>
-                    <textarea value={sellerComment} onChange={e => setSellerComment(e.target.value)} rows={3} placeholder="Reakce nebo připomínky…" style={{ width: "100%", padding: "10px 12px", borderRadius: 10, border: "1.5px solid #e0dbd4", fontSize: 13, fontFamily: "'DM Sans', sans-serif", resize: "none", boxSizing: "border-box" }} />
-                  </div>
-                </div>
-              )}
-              {!commentsSent && <button onClick={() => setCommentsSent(true)} style={{ marginTop: 10, background: "none", border: "1.5px solid #e0dbd4", borderRadius: 9, padding: "8px 16px", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "'DM Sans', sans-serif" }}>Odeslat připomínky</button>}
-            </div>
-
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 20 }}>
-              <ApprovalBox label="Kupující schvaluje" approved={futureContractApproved.buyer} onToggle={() => setFutureContractApproved(s => ({ ...s, buyer: !s.buyer }))} />
-              <ApprovalBox label="Prodávající schvaluje" approved={futureContractApproved.seller} onToggle={() => setFutureContractApproved(s => ({ ...s, seller: !s.seller }))} />
-            </div>
-
-            <div style={{ display: "flex", gap: 10 }}>
-              <PdfBtn onClick={printFutureContract} label="Stáhnout SSBK (PDF)" />
-              {futureContractApproved.buyer && futureContractApproved.seller && (
-                <Btn onClick={() => completeStep("future_contract")}>Smlouva schválena, pokračovat →</Btn>
-              )}
-            </div>
-          </StepCard>
-        </div>
-      )}
-
-      {/* ── KROK 4: KUPNÍ SMLOUVA ── */}
-      {activeStep === "purchase_contract" && (
-        <StepCard title="📄 Kupní smlouva" subtitle="Finální smlouva o převodu vlastnictví. Po podpisu bude podán návrh na vklad do KN.">
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 20 }}>
+        <StepCard title="📝 Smlouva o smlouvě budoucí kupní" subtitle="Obě strany se zaváží uzavřít kupní smlouvu za dohodnutých podmínek. SSBK upravuje i podmínky úschovy a hypotéky.">
+          <div style={{ marginBottom: 20 }}>
             {[
-              { label: "KUPNÍ CENA", value: fmtFull(l.askingPrice) },
-              { label: "DOPLATEK PŘES ÚSCHOVU", value: fmtFull(l.askingPrice - l.reservationFee) },
-              { label: "PŘEDÁNÍ NEMOVITOSTI", value: "Do 14 dní od úhrady" },
-            ].map(item => (
-              <div key={item.label} style={{ background: "#f7f4ef", borderRadius: 12, padding: 14 }}>
-                <div style={{ fontSize: 10, color: "#999", fontWeight: 600, marginBottom: 5 }}>{item.label}</div>
-                <div style={{ fontWeight: 700, fontSize: 14 }}>{item.value}</div>
+              { l: "Termín uzavření KS", v: addDays(+effectiveDeadline) },
+              { l: "Kupní cena", v: fmtFull(l.askingPrice) },
+              { l: "Doplatek přes úschovu", v: fmtFull(l.askingPrice - l.reservationFee) },
+              { l: "Způsob financování", v: fin?.label || "–" },
+              { l: "Úschova kupní ceny", v: "VEBRE Legal, s.r.o." },
+              isHypoteka && { l: "Lhůta pro doložení hypotéky", v: addDays(hypLhuta) },
+              isHypoteka && { l: "Zástavní právo banky", v: mortgageBank + " — zřízeno současně s převodem" },
+            ].filter(Boolean).map(row => (
+              <div key={row.l} style={{ display: "flex", justifyContent: "space-between", padding: "10px 0", borderBottom: "1px solid #f0ede8", fontSize: 13 }}>
+                <span style={{ color: "#888" }}>{row.l}</span><span style={{ fontWeight: 700 }}>{row.v}</span>
               </div>
             ))}
           </div>
-          <div style={{ background: "#dbeafe", border: "1px solid #93c5fd", borderRadius: 10, padding: "12px 16px", marginBottom: 20, fontSize: 13, color: "#1e40af" }}>
-            ℹ️ Kupní cena bude uhrazena přes advokátní úschovu. Uvolnění nastane po zapsání vlastnického práva v katastru.
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 20 }}>
-            <ApprovalBox label="Kupující podepisuje" approved={purchaseContractApproved.buyer} onToggle={() => setPurchaseContractApproved(s => ({ ...s, buyer: !s.buyer }))} />
-            <ApprovalBox label="Prodávající podepisuje" approved={purchaseContractApproved.seller} onToggle={() => setPurchaseContractApproved(s => ({ ...s, seller: !s.seller }))} />
-          </div>
-          <div style={{ display: "flex", gap: 10 }}>
-            <PdfBtn onClick={printPurchaseContract} label="Stáhnout kupní smlouvu (PDF)" />
-            {purchaseContractApproved.buyer && purchaseContractApproved.seller && (
-              <Btn onClick={() => completeStep("purchase_contract")}>Smlouva podepsána →</Btn>
+
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "#999", marginBottom: 8, letterSpacing: "0.05em" }}>PŘIPOMÍNKY KE SMLOUVĚ</div>
+            {commentsSent ? (
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                {buyerComment && <div style={{ background: "#dbeafe", borderRadius: 10, padding: 14, fontSize: 13, color: "#1e40af" }}><strong>Kupující:</strong> {buyerComment}</div>}
+                {sellerComment && <div style={{ background: "#d1fae5", borderRadius: 10, padding: 14, fontSize: 13, color: "#065f46" }}><strong>Prodávající:</strong> {sellerComment}</div>}
+              </div>
+            ) : (
+              <div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 10 }}>
+                  <div><div style={{ fontSize: 11, color: "#3b82f6", fontWeight: 600, marginBottom: 6 }}>KUPUJÍCÍ</div><textarea value={buyerComment} onChange={e => setBuyerComment(e.target.value)} rows={3} placeholder="Vaše připomínky…" style={{ width: "100%", padding: "10px 12px", borderRadius: 10, border: "1.5px solid #e0dbd4", fontSize: 13, fontFamily: "'DM Sans', sans-serif", resize: "none", boxSizing: "border-box" }} /></div>
+                  <div><div style={{ fontSize: 11, color: "#059669", fontWeight: 600, marginBottom: 6 }}>PRODÁVAJÍCÍ</div><textarea value={sellerComment} onChange={e => setSellerComment(e.target.value)} rows={3} placeholder="Reakce nebo připomínky…" style={{ width: "100%", padding: "10px 12px", borderRadius: 10, border: "1.5px solid #e0dbd4", fontSize: 13, fontFamily: "'DM Sans', sans-serif", resize: "none", boxSizing: "border-box" }} /></div>
+                </div>
+                <button onClick={() => setCommentsSent(true)} style={{ background: "none", border: "1.5px solid #e0dbd4", borderRadius: 9, padding: "8px 16px", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "'DM Sans', sans-serif" }}>Odeslat připomínky</button>
+              </div>
             )}
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 20 }}>
+            <ApprovalBox label="Kupující schvaluje" approved={futureApproved.buyer} onToggle={() => setFutureApproved(s => ({ ...s, buyer: !s.buyer }))} />
+            <ApprovalBox label="Prodávající schvaluje" approved={futureApproved.seller} onToggle={() => setFutureApproved(s => ({ ...s, seller: !s.seller }))} />
+          </div>
+
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <PdfBtn onClick={printFutureContract} label="Stáhnout SSBK (PDF)" />
+            {futureApproved.buyer && futureApproved.seller && <Btn onClick={() => completeStep("future_contract")}>SSBK schválena →</Btn>}
           </div>
         </StepCard>
       )}
 
-      {/* ── KROK 5: ÚSCHOVA ── */}
-      {activeStep === "escrow" && (
-        <StepCard title="🔐 Úschova kupní ceny" subtitle="Kupní cena bude uložena na advokátní úschovní účet. Uvolní se po zapsání v katastru.">
+      {/* ── KROK 5: SMLOUVA O ÚSCHOVĚ ── */}
+      {activeStep === "escrow_contract" && (
+        <StepCard title="🔐 Smlouva o advokátní úschově" subtitle="Třístranná smlouva mezi kupujícím, prodávajícím a advokátem. Upravuje podmínky uložení a uvolnění kupní ceny. Musí být uzavřena před kupní smlouvou.">
+          <InfoBox color="blue" icon="ℹ️">Kupní cena nikdy nepřechází přímo mezi stranami. Nejprve jde na úschovní účet advokáta a uvolní se prodávajícímu až po zapsání vlastnického práva kupujícího v katastru nemovitostí.</InfoBox>
+          {isHypoteka && <InfoBox color="amber" icon="🏦">Hypoteční prostředky poukáže banka přímo na úschovní účet. Advokát potvrdí přijetí bance. Zástavní právo banky bude zapsáno do KN současně s převodem vlastnictví.</InfoBox>}
+
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 20 }}>
             <div style={{ background: "#f7f4ef", borderRadius: 12, padding: 16 }}>
               <div style={{ fontSize: 10, color: "#999", fontWeight: 600, marginBottom: 8 }}>ÚSCHOVNÍ ÚČET</div>
               <div style={{ fontWeight: 700, marginBottom: 4 }}>VEBRE Legal, s.r.o.</div>
               <div style={{ fontSize: 12, color: "#666", marginBottom: 2 }}>Číslo účtu: 1234567890/2700</div>
               <div style={{ fontSize: 12, color: "#666", marginBottom: 2 }}>IBAN: CZ65 2700 0000 0012 3456 7890</div>
-              <div style={{ fontSize: 12, color: "#666" }}>VS: {("KS-" + l.id.toUpperCase()).replace("-", "")}</div>
+              <div style={{ fontSize: 12, color: "#666" }}>VS: {("US" + l.id).toUpperCase()}</div>
             </div>
             <div style={{ background: "#f7f4ef", borderRadius: 12, padding: 16 }}>
-              <div style={{ fontSize: 10, color: "#999", fontWeight: 600, marginBottom: 8 }}>PLATEBNÍ INSTRUKCE</div>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6, fontSize: 13 }}><span style={{ color: "#888" }}>K úhradě:</span><span style={{ fontWeight: 700 }}>{fmtFull(l.askingPrice - l.reservationFee)}</span></div>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6, fontSize: 13 }}><span style={{ color: "#888" }}>Splatnost:</span><span style={{ fontWeight: 700 }}>30 dní od podpisu KS</span></div>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}><span style={{ color: "#888" }}>Uvolnění:</span><span style={{ fontWeight: 700 }}>Po zápisu v KN</span></div>
-            </div>
-          </div>
-          {isHypoteka && (
-            <div style={{ background: "#dbeafe", border: "1px solid #93c5fd", borderRadius: 10, padding: "12px 16px", marginBottom: 16, fontSize: 13, color: "#1e40af" }}>
-              🏦 Hypoteční banka poukáže prostředky přímo na úschovní účet. Zajistěte součinnost s vaším hypotečním poradcem.
-            </div>
-          )}
-          <div style={{ marginBottom: 20, padding: "16px 18px", background: escrowConfirmed ? "#f0fdf4" : "#f7f4ef", borderRadius: 12, border: `1.5px solid ${escrowConfirmed ? "#6ee7b7" : "#e0dbd4"}`, cursor: "pointer" }} onClick={() => setEscrowConfirmed(v => !v)}>
-            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <div style={{ width: 22, height: 22, borderRadius: 6, border: `2px solid ${escrowConfirmed ? "#059669" : "#ccc"}`, background: escrowConfirmed ? "#059669" : "#fff", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                {escrowConfirmed && <span style={{ color: "#fff", fontSize: 12, fontWeight: 800 }}>✓</span>}
+              <div style={{ fontSize: 10, color: "#999", fontWeight: 600, marginBottom: 8 }}>PODMÍNKY UVOLNĚNÍ</div>
+              <div style={{ fontSize: 12, color: "#444", lineHeight: 1.7 }}>
+                ✓ Po zápisu vlastnického práva v KN<br />
+                ✓ Do 3 pracovních dnů od předložení výpisu<br />
+                {isHypoteka && "✓ Zástavní právo banky zapsáno současně"}
               </div>
-              <span style={{ fontSize: 13, fontWeight: 600 }}>Potvrzuji odeslání platby na úschovní účet</span>
             </div>
           </div>
-          {escrowConfirmed && <Btn onClick={() => completeStep("escrow")}>Pokračovat k návrhu na vklad →</Btn>}
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 20 }}>
+            {[{ l: "K ULOŽENÍ DO ÚSCHOVY", v: fmtFull(l.askingPrice - l.reservationFee) }, { l: "ODMĚNA ADVOKÁTA", v: "5 000 Kč + DPH" }, { l: "UVOLNĚNÍ", v: "Po zápisu v KN" }].map(item => (
+              <div key={item.l} style={{ background: "#f7f4ef", borderRadius: 12, padding: 14 }}><div style={{ fontSize: 10, color: "#999", fontWeight: 600, marginBottom: 5 }}>{item.l}</div><div style={{ fontWeight: 700, fontSize: 13 }}>{item.v}</div></div>
+            ))}
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 20 }}>
+            <ApprovalBox label="Kupující podepisuje" approved={escrowContractApproved.buyer} onToggle={() => setEscrowContractApproved(s => ({ ...s, buyer: !s.buyer }))} />
+            <ApprovalBox label="Prodávající podepisuje" approved={escrowContractApproved.seller} onToggle={() => setEscrowContractApproved(s => ({ ...s, seller: !s.seller }))} />
+          </div>
+
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <PdfBtn onClick={printEscrowContract} label="Stáhnout smlouvu o úschově (PDF)" />
+            {escrowContractApproved.buyer && escrowContractApproved.seller && <Btn onClick={() => completeStep("escrow_contract")}>Smlouva o úschově podepsána →</Btn>}
+          </div>
         </StepCard>
       )}
 
-      {/* ── KROK 6: KATASTR ── */}
-      {activeStep === "cadastre" && (
-        <div>
-          <StepCard title="🏛️ Návrh na vklad do katastru nemovitostí" subtitle="Posledním krokem je podání návrhu na vklad. Advokát ho podá do 5 pracovních dnů od podpisu KS.">
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 20 }}>
-              {[
-                { label: "Katastrální úřad", value: "KÚ pro hl. m. Prahu" },
-                { label: "Správní poplatek", value: "2 000 Kč" },
-                { label: "Lhůta pro podání", value: "Do 5 pracovních dnů" },
-                { label: "Standardní lhůta zápisu", value: "20–30 dní" },
-              ].map(item => (
-                <div key={item.label} style={{ background: "#f7f4ef", borderRadius: 12, padding: 14 }}>
-                  <div style={{ fontSize: 10, color: "#999", fontWeight: 600, marginBottom: 5 }}>{item.label}</div>
-                  <div style={{ fontWeight: 700, fontSize: 14 }}>{item.value}</div>
-                </div>
+      {/* ── KROK 6: KUPNÍ SMLOUVA ── */}
+      {activeStep === "purchase_contract" && (
+        <StepCard title="📄 Kupní smlouva" subtitle="Finální smlouva o převodu vlastnictví. Vlastnické právo přechází zápisem do katastru nemovitostí, nikoliv podpisem smlouvy.">
+          <InfoBox color="blue" icon="ℹ️">Dle § 1105 OZ nabývá kupující vlastnické právo k nemovitosti <strong>zápisem do katastru nemovitostí</strong>, nikoliv podpisem kupní smlouvy. Podpisem smlouvy vzniká pouze závazek k převodu.</InfoBox>
+          {isHypoteka && <InfoBox color="amber" icon="🏦">Prodávající v kupní smlouvě uděluje souhlas se zřízením zástavního práva banky {mortgageBank}. Zástavní právo bude zapsáno do KN současně s převodem vlastnictví kupujícímu.</InfoBox>}
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 20 }}>
+            {[{ l: "KUPNÍ CENA", v: fmtFull(l.askingPrice) }, { l: "DOPLATEK PŘES ÚSCHOVU", v: fmtFull(l.askingPrice - l.reservationFee) }, { l: "PŘEDÁNÍ NEMOVITOSTI", v: "Do 14 dní od připsání do úschovy" }].map(item => (
+              <div key={item.l} style={{ background: "#f7f4ef", borderRadius: 12, padding: 14 }}><div style={{ fontSize: 10, color: "#999", fontWeight: 600, marginBottom: 5 }}>{item.l}</div><div style={{ fontWeight: 700, fontSize: 13 }}>{item.v}</div></div>
+            ))}
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 20 }}>
+            <ApprovalBox label="Kupující podepisuje" approved={purchaseApproved.buyer} onToggle={() => setPurchaseApproved(s => ({ ...s, buyer: !s.buyer }))} />
+            <ApprovalBox label="Prodávající podepisuje" approved={purchaseApproved.seller} onToggle={() => setPurchaseApproved(s => ({ ...s, seller: !s.seller }))} />
+          </div>
+
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <PdfBtn onClick={printPurchaseContract} label="Stáhnout kupní smlouvu (PDF)" />
+            {purchaseApproved.buyer && purchaseApproved.seller && <Btn onClick={() => completeStep("purchase_contract")}>Kupní smlouva podepsána →</Btn>}
+          </div>
+        </StepCard>
+      )}
+
+      {/* ── KROK 7: ÚHRADA DO ÚSCHOVY ── */}
+      {activeStep === "escrow_payment" && (
+        <StepCard title="💳 Úhrada kupní ceny do úschovy" subtitle="Doplatek kupní ceny odešlete na úschovní účet advokáta. Bez přijetí na úschovním účtu nelze podat návrh na vklad.">
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 20 }}>
+            <div style={{ background: "#f7f4ef", borderRadius: 12, padding: 16 }}>
+              <div style={{ fontSize: 10, color: "#999", fontWeight: 600, marginBottom: 8 }}>PLATEBNÍ INSTRUKCE</div>
+              {[["Číslo účtu", "1234567890/2700"], ["IBAN", "CZ65 2700 0000 0012 3456 7890"], ["Variabilní symbol", ("US" + l.id).toUpperCase()], ["Částka", fmtFull(l.askingPrice - l.reservationFee)], ["Splatnost", "30 dní od podpisu KS"]].map(([label, value]) => (
+                <div key={label} style={{ display: "flex", justifyContent: "space-between", marginBottom: 7, fontSize: 13 }}><span style={{ color: "#888" }}>{label}</span><span style={{ fontWeight: 700, fontFamily: label === "IBAN" || label === "Číslo účtu" ? "monospace" : "inherit" }}>{value}</span></div>
               ))}
             </div>
-
-            <div style={{ marginBottom: 20 }}>
-              <PdfBtn onClick={printCadastre} label="Stáhnout návrh na vklad (PDF)" />
+            <div style={{ background: "#f7f4ef", borderRadius: 12, padding: 16 }}>
+              <div style={{ fontSize: 10, color: "#999", fontWeight: 600, marginBottom: 8 }}>CO NÁSLEDUJE PO PŘIJETÍ</div>
+              <div style={{ fontSize: 12, color: "#444", lineHeight: 1.9 }}>
+                1. Advokát potvrdí přijetí prostředků<br />
+                {isHypoteka ? `2. Banka ${mortgageBank} poukáže hypotéku<br />3. Advokát podá návrh na vklad do KN<br />` : "2. Advokát podá návrh na vklad do KN<br />"}
+                {isHypoteka ? "4." : "3."} Po zápisu uvolnění prodávajícímu
+              </div>
             </div>
+          </div>
 
-            {/* Rezervace advokáta */}
-            <div style={{ borderTop: "1px solid #f0ede8", paddingTop: 20 }}>
-              <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4 }}>📅 Rezervace termínu u advokáta</div>
-              <div style={{ fontSize: 12, color: "#888", marginBottom: 16 }}>VEBRE Legal, s.r.o. · Praha 1, Národní 12 · +420 222 333 444</div>
+          {isHypoteka && <InfoBox color="blue" icon="🏦">Informujte svého hypotečního poradce o čísle úschovního účtu. Banka poukáže prostředky přímo na tento účet po podpisu zástavní smlouvy.</InfoBox>}
 
-              {lawyerBooked ? (
-                <div style={{ background: "#f0fdf4", border: "1px solid #6ee7b7", borderRadius: 12, padding: 20, textAlign: "center" }}>
-                  <div style={{ fontSize: 36, marginBottom: 10 }}>🎉</div>
-                  <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 6 }}>Termín rezervován!</div>
-                  <div style={{ fontSize: 13, color: "#059669", marginBottom: 4 }}>📅 {lawyerSlot?.date} v {lawyerSlot?.time}</div>
-                  <div style={{ fontSize: 12, color: "#888" }}>Potvrzení vám zašleme e-mailem. Advokát vás kontaktuje do 24 hodin.</div>
-                </div>
-              ) : (
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 280px", gap: 20 }}>
-                  <div style={{ maxHeight: 280, overflowY: "auto", display: "flex", flexDirection: "column", gap: 7 }}>
-                    {lawyerSlots.slice(0, 15).map(slot => (
-                      <div key={slot.id} onClick={() => setLawyerSlot(slot)} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px", borderRadius: 10, border: `1.5px solid ${lawyerSlot?.id === slot.id ? "#1a1a1a" : "#e0dbd4"}`, background: lawyerSlot?.id === slot.id ? "#1a1a1a" : "#fff", cursor: "pointer" }}>
-                        <div style={{ fontSize: 13, fontWeight: 600, color: lawyerSlot?.id === slot.id ? "#fff" : "#1a1a1a" }}>{slot.date} · {slot.time}</div>
-                        {lawyerSlot?.id === slot.id && <span style={{ color: "#C9A84C", fontWeight: 700, fontSize: 13 }}>✓</span>}
-                      </div>
-                    ))}
-                  </div>
-                  <Card style={{ padding: 18 }}>
-                    {lawyerSlot && <div style={{ background: "#f0fdf4", borderRadius: 9, padding: "10px 12px", fontSize: 13, color: "#059669", fontWeight: 600, marginBottom: 14 }}>📅 {lawyerSlot.date} · {lawyerSlot.time}</div>}
-                    <Input label="JMÉNO" value={lawyerForm.name} onChange={e => setLawyerForm(f => ({ ...f, name: e.target.value }))} placeholder="Jan Novák" />
-                    <Input label="E-MAIL" value={lawyerForm.email} onChange={e => setLawyerForm(f => ({ ...f, email: e.target.value }))} placeholder="jan@email.cz" />
-                    <Input label="TELEFON" value={lawyerForm.phone} onChange={e => setLawyerForm(f => ({ ...f, phone: e.target.value }))} placeholder="+420 600 000 000" />
-                    <Btn full disabled={!lawyerSlot || !lawyerForm.name || !lawyerForm.email} onClick={() => { setLawyerBooked(true); setCadastreReady(true); completeStep("cadastre"); }}>
-                      Rezervovat termín →
-                    </Btn>
-                  </Card>
-                </div>
-              )}
+          <div style={{ marginBottom: 20, padding: "16px 18px", background: escrowSent ? "#f0fdf4" : "#f7f4ef", borderRadius: 12, border: `1.5px solid ${escrowSent ? "#6ee7b7" : "#e0dbd4"}`, cursor: "pointer" }} onClick={() => setEscrowSent(v => !v)}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <div style={{ width: 22, height: 22, borderRadius: 6, border: `2px solid ${escrowSent ? "#059669" : "#ccc"}`, background: escrowSent ? "#059669" : "#fff", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                {escrowSent && <span style={{ color: "#fff", fontSize: 12, fontWeight: 800 }}>✓</span>}
+              </div>
+              <span style={{ fontSize: 13, fontWeight: 600 }}>Potvrzuji odeslání platby na úschovní účet advokáta</span>
             </div>
-          </StepCard>
+          </div>
 
-          {cadastreReady && (
-            <div style={{ background: "#f0fdf4", border: "2px solid #6ee7b7", borderRadius: 16, padding: 28, textAlign: "center" }}>
-              <div style={{ fontSize: 48, marginBottom: 12 }}>🏠</div>
-              <h2 style={{ ...D, fontSize: 24, fontWeight: 800, marginBottom: 8, color: "#059669" }}>Proces koupě dokončen!</h2>
-              <p style={{ color: "#666", fontSize: 14, marginBottom: 20, lineHeight: 1.6 }}>Všechny kroky jsou splněny. Advokát podá návrh na vklad do katastru a po zápisu vám bude uvolněna nemovitost.</p>
+          {escrowSent && <Btn onClick={() => completeStep("escrow_payment")}>Pokračovat k návrhu na vklad →</Btn>}
+        </StepCard>
+      )}
+
+      {/* ── KROK 8: KATASTR ── */}
+      {activeStep === "cadastre" && (
+        <StepCard title="🏛️ Návrh na vklad do katastru nemovitostí" subtitle="Advokát podá návrh na vklad do 5 pracovních dnů od podpisu kupní smlouvy. Standardní lhůta zápisu je 20–30 dní.">
+          <InfoBox color="blue" icon="ℹ️">Návrh na vklad podává advokát elektronicky nebo osobně na KÚ. Správní poplatek je {isHypoteka ? "4 000 Kč (vlastnické právo + zástavní právo)" : "2 000 Kč (vlastnické právo)"}. Do zápisu nemůže prodávající s nemovitostí nakládat.</InfoBox>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 20 }}>
+            {[{ l: "Katastrální úřad", v: "KÚ pro hl. m. Prahu, KP Praha" }, { l: "Správní poplatek", v: isHypoteka ? "4 000 Kč" : "2 000 Kč" }, { l: "Lhůta pro podání", v: "Do 5 pracovních dnů od podpisu KS" }, { l: "Lhůta zápisu KÚ", v: "20–30 dní (může být delší)" }].map(item => (
+              <div key={item.l} style={{ background: "#f7f4ef", borderRadius: 12, padding: 14 }}><div style={{ fontSize: 10, color: "#999", fontWeight: 600, marginBottom: 5 }}>{item.l}</div><div style={{ fontWeight: 700, fontSize: 13 }}>{item.v}</div></div>
+            ))}
+          </div>
+
+          <PdfBtn onClick={printCadastre} label="Stáhnout návrh na vklad do KN (PDF)" />
+
+          <div style={{ marginTop: 20, paddingTop: 20, borderTop: "1px solid #f0ede8" }}>
+            <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4 }}>📅 Rezervace termínu u advokáta</div>
+            <div style={{ fontSize: 12, color: "#888", marginBottom: 16 }}>VEBRE Legal, s.r.o. · Praha 1, Národní 12 · +420 222 333 444</div>
+
+            {lawyerBooked ? (
+              <div style={{ background: "#f0fdf4", border: "1px solid #6ee7b7", borderRadius: 12, padding: 20, textAlign: "center" }}>
+                <div style={{ fontSize: 36, marginBottom: 8 }}>🎉</div>
+                <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4 }}>Termín rezervován!</div>
+                <div style={{ fontSize: 13, color: "#059669" }}>📅 {lawyerSlot?.date} v {lawyerSlot?.time}</div>
+              </div>
+            ) : (
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 280px", gap: 20 }}>
+                <div style={{ maxHeight: 260, overflowY: "auto", display: "flex", flexDirection: "column", gap: 6 }}>
+                  {lawyerSlots.slice(0, 15).map(slot => (
+                    <div key={slot.id} onClick={() => setLawyerSlot(slot)} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "11px 14px", borderRadius: 10, border: `1.5px solid ${lawyerSlot?.id === slot.id ? "#1a1a1a" : "#e0dbd4"}`, background: lawyerSlot?.id === slot.id ? "#1a1a1a" : "#fff", cursor: "pointer" }}>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: lawyerSlot?.id === slot.id ? "#fff" : "#1a1a1a" }}>{slot.date} · {slot.time}</span>
+                      {lawyerSlot?.id === slot.id && <span style={{ color: "#C9A84C", fontWeight: 700 }}>✓</span>}
+                    </div>
+                  ))}
+                </div>
+                <Card style={{ padding: 18 }}>
+                  {lawyerSlot && <div style={{ background: "#f0fdf4", borderRadius: 9, padding: "10px 12px", fontSize: 13, color: "#059669", fontWeight: 600, marginBottom: 14 }}>📅 {lawyerSlot.date} · {lawyerSlot.time}</div>}
+                  <Input label="JMÉNO" value={lawyerForm.name} onChange={e => setLawyerForm(f => ({ ...f, name: e.target.value }))} placeholder="Jan Novák" />
+                  <Input label="E-MAIL" value={lawyerForm.email} onChange={e => setLawyerForm(f => ({ ...f, email: e.target.value }))} placeholder="jan@email.cz" />
+                  <Input label="TELEFON" value={lawyerForm.phone} onChange={e => setLawyerForm(f => ({ ...f, phone: e.target.value }))} placeholder="+420 600 000 000" />
+                  <Btn full disabled={!lawyerSlot || !lawyerForm.name || !lawyerForm.email} onClick={() => { setLawyerBooked(true); completeStep("cadastre"); }}>Rezervovat termín →</Btn>
+                </Card>
+              </div>
+            )}
+          </div>
+        </StepCard>
+      )}
+
+      {/* ── KROK 9: PŘEDÁNÍ ── */}
+      {activeStep === "handover" && (
+        <StepCard title="🔑 Předání nemovitosti" subtitle="Nemovitost se předává po zápisu vlastnického práva v katastru nemovitostí a uvolnění kupní ceny z úschovy. Sepište předávací protokol.">
+          <InfoBox color="green" icon="✅">Vlastnické právo bylo zapsáno v katastru nemovitostí. Kupní cena byla uvolněna prodávajícímu. Nyní probíhá fyzické předání nemovitosti.</InfoBox>
+
+          <div style={{ marginBottom: 16 }}>
+            <Input label="DATUM PŘEDÁNÍ" value={handoverDate} onChange={e => setHandoverDate(e.target.value)} placeholder={today} />
+          </div>
+
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "#999", marginBottom: 10, letterSpacing: "0.05em" }}>STAVY MĚŘIČŮ K DATU PŘEDÁNÍ</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+              <Input label="ELEKTŘINA (stav + č. měřiče)" value={meterReadings.electricity} onChange={e => setMeterReadings(m => ({ ...m, electricity: e.target.value }))} placeholder="Např. 12345 kWh, EL123456" />
+              <Input label="PLYN (stav + č. měřiče)" value={meterReadings.gas} onChange={e => setMeterReadings(m => ({ ...m, gas: e.target.value }))} placeholder="Např. 678 m³, PL789012" />
+              <Input label="VODA (stav + č. měřiče)" value={meterReadings.water} onChange={e => setMeterReadings(m => ({ ...m, water: e.target.value }))} placeholder="Např. 234 m³, V345678" />
+            </div>
+          </div>
+
+          <div style={{ marginBottom: 20, padding: "16px 18px", background: keysHandedOver ? "#f0fdf4" : "#f7f4ef", borderRadius: 12, border: `1.5px solid ${keysHandedOver ? "#6ee7b7" : "#e0dbd4"}`, cursor: "pointer" }} onClick={() => setKeysHandedOver(v => !v)}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <div style={{ width: 22, height: 22, borderRadius: 6, border: `2px solid ${keysHandedOver ? "#059669" : "#ccc"}`, background: keysHandedOver ? "#059669" : "#fff", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                {keysHandedOver && <span style={{ color: "#fff", fontSize: 12, fontWeight: 800 }}>✓</span>}
+              </div>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 2 }}>🔑 Klíče a přístupové prostředky předány kupujícímu</div>
+                <div style={{ fontSize: 11, color: "#888" }}>Kupující potvrzuje převzetí všech klíčů</div>
+              </div>
+            </div>
+          </div>
+
+          <InfoBox color="amber" icon="💡">Nezapomeňte: sjednejte pojištění nemovitosti nejpozději ke dni předání. Přihlaste se k odběru energií a zajistěte přepis smluv s dodavateli.</InfoBox>
+
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <PdfBtn onClick={printHandover} label="Stáhnout předávací protokol (PDF)" />
+            {keysHandedOver && (
+              <Btn onClick={() => { setHandoverComplete(true); completeStep("handover"); }}>Předání dokončeno →</Btn>
+            )}
+          </div>
+
+          {handoverComplete && (
+            <div style={{ marginTop: 24, background: "#f0fdf4", border: "2px solid #6ee7b7", borderRadius: 16, padding: 28, textAlign: "center" }}>
+              <div style={{ fontSize: 52, marginBottom: 12 }}>🏠</div>
+              <h2 style={{ ...D, fontSize: 24, fontWeight: 800, marginBottom: 8, color: "#059669" }}>Gratulujeme! Proces koupě je dokončen.</h2>
+              <p style={{ color: "#666", fontSize: 14, marginBottom: 20, lineHeight: 1.7 }}>Vlastnické právo bylo zapsáno v katastru, kupní cena uvolněna a nemovitost předána. Přejeme vám mnoho spokojenosti v novém domově!</p>
               <Btn onClick={() => setPage("buyer-dash")}>Zpět na dashboard</Btn>
             </div>
           )}
-        </div>
+        </StepCard>
       )}
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   );
 };
+
 
 // ─── KUPNÍ SMLOUVA ────────────────────────────────────────────────────────────
 const PurchaseContractPage = ({ id, setPage, user }) => {
