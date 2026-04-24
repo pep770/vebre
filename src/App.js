@@ -1082,6 +1082,7 @@ const HomePage = ({ setPage }) => {
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 28 }}><h2 style={{ ...D, fontSize: 28, fontWeight: 800 }}>Vybrané nemovitosti</h2><Btn variant="outline" small onClick={() => setPage("listings")}>Zobrazit vše →</Btn></div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 20 }}>{listings.slice(0, 3).map(l => <ListingCard key={l.id} l={l} setPage={setPage} />)}</div>
       </div>
+      </div>
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   );
